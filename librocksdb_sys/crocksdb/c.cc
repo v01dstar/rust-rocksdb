@@ -245,6 +245,8 @@ struct crocksdb_readoptions_t {
   ReadOptions rep;
   Slice upper_bound;  // stack variable to set pointer to in ReadOptions
   Slice lower_bound;
+  Slice timestamp;
+  Slice iter_start_ts;
 };
 struct crocksdb_writeoptions_t {
   WriteOptions rep;
@@ -474,6 +476,15 @@ struct crocksdb_comparator_t : public Comparator {
   int (*compare_)(void*, const char* a, size_t alen, const char* b,
                   size_t blen);
   const char* (*name_)(void*);
+  int (*compare_ts_)(void*, const char* a_ts, size_t a_tslen, const char* b_ts,
+                     size_t b_tslen);
+  int (*compare_without_ts_)(void*, const char* a, size_t alen,
+                             unsigned char a_has_ts, const char* b, size_t blen,
+                             unsigned char b_has_ts);
+
+  crocksdb_comparator_t(size_t ts_sz) : Comparator(ts_sz) {
+    assert(timestamp_size() != 0);
+  }
 
   virtual ~crocksdb_comparator_t() { (*destructor_)(state_); }
 
@@ -487,6 +498,22 @@ struct crocksdb_comparator_t : public Comparator {
   virtual void FindShortestSeparator(std::string*,
                                      const Slice&) const override {}
   virtual void FindShortSuccessor(std::string*) const override {}
+
+  virtual int CompareTimestamp(const Slice& a, const Slice& b) const override {
+    if (compare_ts_ == nullptr) {
+      return 0;
+    }
+    return (*compare_ts_)(state_, a.data(), a.size(), b.data(), b.size());
+  }
+  virtual int CompareWithoutTimestamp(const Slice& a, bool a_has_ts,
+                                      const Slice& b,
+                                      bool b_has_ts) const override {
+    if (compare_without_ts_ == nullptr) {
+      return Compare(a, b);
+    }
+    return (*compare_without_ts_)(state_, a.data(), a.size(), a_has_ts,
+                                  b.data(), b.size(), b_has_ts);
+  }
 };
 
 struct crocksdb_filterpolicy_t : public FilterPolicy {
@@ -1015,6 +1042,26 @@ void crocksdb_put_cf(crocksdb_t* db, const crocksdb_writeoptions_t* options,
                                  Slice(key, keylen), Slice(val, vallen)));
 }
 
+void crocksdb_put_with_ts(crocksdb_t* db,
+                          const crocksdb_writeoptions_t* options,
+                          const char* key, size_t keylen, const char* ts,
+                          size_t tslen, const char* val, size_t vallen,
+                          char** errptr) {
+  SaveError(errptr, db->rep->Put(options->rep, Slice(key, keylen),
+                                 Slice(ts, tslen), Slice(val, vallen)));
+}
+
+void crocksdb_put_cf_with_ts(crocksdb_t* db,
+                             const crocksdb_writeoptions_t* options,
+                             crocksdb_column_family_handle_t* column_family,
+                             const char* key, size_t keylen, const char* ts,
+                             size_t tslen, const char* val, size_t vallen,
+                             char** errptr) {
+  SaveError(errptr,
+            db->rep->Put(options->rep, column_family->rep, Slice(key, keylen),
+                         Slice(ts, tslen), Slice(val, vallen)));
+}
+
 void crocksdb_delete(crocksdb_t* db, const crocksdb_writeoptions_t* options,
                      const char* key, size_t keylen, char** errptr) {
   SaveError(errptr, db->rep->Delete(options->rep, Slice(key, keylen)));
@@ -1025,6 +1072,23 @@ void crocksdb_delete_cf(crocksdb_t* db, const crocksdb_writeoptions_t* options,
                         const char* key, size_t keylen, char** errptr) {
   SaveError(errptr, db->rep->Delete(options->rep, column_family->rep,
                                     Slice(key, keylen)));
+}
+
+void crocksdb_delete_with_ts(crocksdb_t* db,
+                             const crocksdb_writeoptions_t* options,
+                             const char* key, size_t keylen, const char* ts,
+                             size_t tlen, char** errptr) {
+  SaveError(errptr,
+            db->rep->Delete(options->rep, Slice(key, keylen), Slice(ts, tlen)));
+}
+
+void crocksdb_delete_cf_with_ts(crocksdb_t* db,
+                                const crocksdb_writeoptions_t* options,
+                                crocksdb_column_family_handle_t* column_family,
+                                const char* key, size_t keylen, const char* ts,
+                                size_t tlen, char** errptr) {
+  SaveError(errptr, db->rep->Delete(options->rep, column_family->rep,
+                                    Slice(key, keylen), Slice(ts, tlen)));
 }
 
 void crocksdb_single_delete(crocksdb_t* db,
@@ -1039,6 +1103,23 @@ void crocksdb_single_delete_cf(crocksdb_t* db,
                                const char* key, size_t keylen, char** errptr) {
   SaveError(errptr, db->rep->SingleDelete(options->rep, column_family->rep,
                                           Slice(key, keylen)));
+}
+
+void crocksdb_single_delete_with_ts(crocksdb_t* db,
+                                    const crocksdb_writeoptions_t* options,
+                                    const char* key, size_t keylen,
+                                    const char* ts, size_t tlen,
+                                    char** errptr) {
+  SaveError(errptr, db->rep->SingleDelete(options->rep, Slice(key, keylen),
+                                          Slice(ts, tlen)));
+}
+
+void crocksdb_single_delete_cf_with_ts(
+    crocksdb_t* db, const crocksdb_writeoptions_t* options,
+    crocksdb_column_family_handle_t* column_family, const char* key,
+    size_t keylen, const char* ts, size_t tlen, char** errptr) {
+  SaveError(errptr, db->rep->SingleDelete(options->rep, column_family->rep,
+                                          Slice(key, keylen), Slice(ts, tlen)));
 }
 
 void crocksdb_delete_range_cf(crocksdb_t* db,
@@ -1530,6 +1611,12 @@ const char* crocksdb_iter_key(const crocksdb_iterator_t* iter, size_t* klen) {
   return s.data();
 }
 
+const char* crocksdb_iter_ts(const crocksdb_iterator_t* iter, size_t* tlen) {
+  Slice s = iter->rep->timestamp();
+  *tlen = s.size();
+  return s.data();
+}
+
 const char* crocksdb_iter_value(const crocksdb_iterator_t* iter, size_t* vlen) {
   Slice s = iter->rep->value();
   *vlen = s.size();
@@ -1580,6 +1667,14 @@ void crocksdb_writebatch_put_cf(crocksdb_writebatch_t* b,
                                 const char* key, size_t klen, const char* val,
                                 size_t vlen) {
   b->rep.Put(column_family->rep, Slice(key, klen), Slice(val, vlen));
+}
+
+void crocksdb_writebatch_put_cf_with_ts(
+    crocksdb_writebatch_t* b, crocksdb_column_family_handle_t* column_family,
+    const char* key, size_t klen, const char* ts, size_t tlen, const char* val,
+    size_t vlen) {
+  b->rep.Put(column_family->rep, Slice(key, klen), Slice(ts, tlen),
+             Slice(val, vlen));
 }
 
 void crocksdb_writebatch_putv(crocksdb_writebatch_t* b, int num_keys,
@@ -1673,6 +1768,12 @@ void crocksdb_writebatch_delete_cf(
   b->rep.Delete(column_family->rep, Slice(key, klen));
 }
 
+void crocksdb_writebatch_delete_cf_with_ts(
+    crocksdb_writebatch_t* b, crocksdb_column_family_handle_t* column_family,
+    const char* key, size_t klen, const char* ts, size_t tlen) {
+  b->rep.Delete(column_family->rep, Slice(key, klen), Slice(ts, tlen));
+}
+
 void crocksdb_writebatch_single_delete(crocksdb_writebatch_t* b,
                                        const char* key, size_t klen) {
   b->rep.SingleDelete(Slice(key, klen));
@@ -1682,6 +1783,12 @@ void crocksdb_writebatch_single_delete_cf(
     crocksdb_writebatch_t* b, crocksdb_column_family_handle_t* column_family,
     const char* key, size_t klen) {
   b->rep.SingleDelete(column_family->rep, Slice(key, klen));
+}
+
+void crocksdb_writebatch_single_delete_cf_with_ts(
+    crocksdb_writebatch_t* b, crocksdb_column_family_handle_t* column_family,
+    const char* key, size_t klen, const char* ts, size_t tlen) {
+  b->rep.SingleDelete(column_family->rep, Slice(key, klen), Slice(ts, tlen));
 }
 
 void crocksdb_writebatch_deletev(crocksdb_writebatch_t* b, int num_keys,
@@ -3597,15 +3704,26 @@ void crocksdb_compactionfilterfactory_destroy(
 }
 
 crocksdb_comparator_t* crocksdb_comparator_create(
-    void* state, void (*destructor)(void*),
+    void* state, size_t ts_sz, void (*destructor)(void*),
     int (*compare)(void*, const char* a, size_t alen, const char* b,
                    size_t blen),
+    int (*compare_ts)(void*, const char* a_ts, size_t a_tslen, const char* b_ts,
+                      size_t b_tslen),
+    int (*compare_without_ts)(void*, const char* a, size_t alen,
+                              unsigned char a_has_ts, const char* b,
+                              size_t blen, unsigned char b_has_ts),
     const char* (*name)(void*)) {
-  crocksdb_comparator_t* result = new crocksdb_comparator_t;
+  crocksdb_comparator_t* result = new crocksdb_comparator_t(ts_sz);
   result->state_ = state;
   result->destructor_ = destructor;
   result->compare_ = compare;
   result->name_ = name;
+  if (compare_ts != nullptr) {
+    result->compare_ts_ = compare_ts;
+  }
+  if (compare_without_ts != nullptr) {
+    result->compare_without_ts_ = compare_without_ts;
+  }
   return result;
 }
 
@@ -3852,6 +3970,28 @@ void crocksdb_readoptions_set_table_filter(
     unsigned char (*table_filter)(void*, const crocksdb_table_properties_t*),
     void (*destroy)(void*)) {
   opt->rep.table_filter = TableFilter(ctx, table_filter, destroy);
+}
+
+void crocksdb_readoptions_set_timestamp(crocksdb_readoptions_t* opt,
+                                        const char* ts, size_t tslen) {
+  if (ts == nullptr) {
+    opt->timestamp = Slice();
+    opt->rep.timestamp = nullptr;
+  } else {
+    opt->timestamp = Slice(ts, tslen);
+    opt->rep.timestamp = &opt->timestamp;
+  }
+}
+
+void crocksdb_readoptions_set_iter_start_ts(crocksdb_readoptions_t* opt,
+                                            const char* ts, size_t tslen) {
+  if (ts == nullptr) {
+    opt->iter_start_ts = Slice();
+    opt->rep.iter_start_ts = nullptr;
+  } else {
+    opt->iter_start_ts = Slice(ts, tslen);
+    opt->rep.iter_start_ts = &opt->iter_start_ts;
+  }
 }
 
 crocksdb_writeoptions_t* crocksdb_writeoptions_create() {
@@ -4521,6 +4661,15 @@ void crocksdb_sstfilewriter_put(crocksdb_sstfilewriter_t* writer,
   SaveError(errptr, writer->rep->Put(Slice(key, keylen), Slice(val, vallen)));
 }
 
+void crocksdb_sstfilewriter_put_with_ts(crocksdb_sstfilewriter_t* writer,
+                                        const char* key, size_t keylen,
+                                        const char* ts, size_t tslen,
+                                        const char* val, size_t vallen,
+                                        char** errptr) {
+  SaveError(errptr, writer->rep->Put(Slice(key, keylen), Slice(ts, tslen),
+                                     Slice(val, vallen)));
+}
+
 void crocksdb_sstfilewriter_merge(crocksdb_sstfilewriter_t* writer,
                                   const char* key, size_t keylen,
                                   const char* val, size_t vallen,
@@ -4532,6 +4681,13 @@ void crocksdb_sstfilewriter_delete(crocksdb_sstfilewriter_t* writer,
                                    const char* key, size_t keylen,
                                    char** errptr) {
   SaveError(errptr, writer->rep->Delete(Slice(key, keylen)));
+}
+
+void crocksdb_sstfilewriter_delete_with_ts(crocksdb_sstfilewriter_t* writer,
+                                           const char* key, size_t keylen,
+                                           const char* ts, size_t tslen,
+                                           char** errptr) {
+  SaveError(errptr, writer->rep->Delete(Slice(key, keylen), Slice(ts, tslen)));
 }
 
 void crocksdb_sstfilewriter_delete_range(crocksdb_sstfilewriter_t* writer,
@@ -5002,6 +5158,26 @@ crocksdb_pinnableslice_t* crocksdb_get_pinned_cf(
     }
     return NULL;
   }
+  return v;
+}
+
+crocksdb_pinnableslice_t* crocksdb_get_pinned_cf_ts(
+    crocksdb_t* db, const crocksdb_readoptions_t* options,
+    crocksdb_column_family_handle_t* column_family, const char* key,
+    size_t keylen, char** ts, size_t* tslen, char** errptr) {
+  crocksdb_pinnableslice_t* v = new (crocksdb_pinnableslice_t);
+  std::string tmp;
+  Status s = db->rep->Get(options->rep, column_family->rep, Slice(key, keylen),
+                          &v->rep, &tmp);
+  if (!s.ok()) {
+    delete v;
+    if (!s.IsNotFound()) {
+      SaveError(errptr, s);
+    }
+    return NULL;
+  }
+  *ts = CopyString(tmp);
+  *tslen = tmp.size();
   return v;
 }
 

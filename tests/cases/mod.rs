@@ -21,6 +21,7 @@ mod test_table_properties;
 mod test_table_properties_rc;
 mod test_titan;
 mod test_ttl;
+mod test_user_timestamp;
 
 fn tempdir_with_prefix(prefix: &str) -> tempfile::TempDir {
     tempfile::Builder::new().prefix(prefix).tempdir().expect("")

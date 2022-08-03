@@ -17,7 +17,9 @@ use compaction_filter::{
     new_compaction_filter, new_compaction_filter_factory, CompactionFilter,
     CompactionFilterFactory, CompactionFilterHandle,
 };
-use comparator::{self, compare_callback, ComparatorCallback};
+use comparator::{
+    self, compare_callback, ComparatorCallback, ComparatorRAIIWrapper, TimestampAwareComparator,
+};
 use crocksdb_ffi::{
     self, ChecksumType, DBBlockBasedTableOptions, DBBottommostLevelCompaction, DBCompactOptions,
     DBCompactionOptions, DBCompressionType, DBFifoCompactionOptions, DBFlushOptions,
@@ -329,6 +331,8 @@ pub struct ReadOptions {
     inner: *mut DBReadOptions,
     lower_bound: Vec<u8>,
     upper_bound: Vec<u8>,
+    timestamp: Vec<u8>,
+    iter_start_ts: Vec<u8>,
     titan_inner: *mut DBTitanReadOptions,
 }
 
@@ -352,6 +356,8 @@ impl Default for ReadOptions {
                 inner: opts,
                 lower_bound: vec![],
                 upper_bound: vec![],
+                timestamp: vec![],
+                iter_start_ts: vec![],
                 titan_inner: ptr::null_mut::<DBTitanReadOptions>(),
             }
         }
@@ -515,6 +521,36 @@ impl ReadOptions {
                 table_filter::<T>,
                 destroy_table_filter::<T>,
             );
+        }
+    }
+
+    pub fn get_timestamp(&self) -> &[u8] {
+        &self.timestamp
+    }
+
+    pub fn set_timestamp(&mut self, timestamp: Vec<u8>) {
+        self.timestamp = timestamp;
+        unsafe {
+            crocksdb_ffi::crocksdb_readoptions_set_timestamp(
+                self.inner,
+                self.timestamp.as_ptr(),
+                self.timestamp.len(),
+            )
+        }
+    }
+
+    pub fn get_iter_start_ts(&self) -> &[u8] {
+        &self.iter_start_ts
+    }
+
+    pub fn set_iter_start_ts(&mut self, timestamp: Vec<u8>) {
+        self.iter_start_ts = timestamp;
+        unsafe {
+            crocksdb_ffi::crocksdb_readoptions_set_iter_start_ts(
+                self.inner,
+                self.iter_start_ts.as_ptr(),
+                self.iter_start_ts.len(),
+            )
         }
     }
 }
@@ -690,6 +726,7 @@ pub struct DBOptions {
     pub inner: *mut Options,
     env: Option<Arc<Env>>,
     pub titan_inner: *mut DBTitanDBOptions,
+    comparator: Option<ComparatorRAIIWrapper>,
 }
 
 impl Drop for DBOptions {
@@ -712,6 +749,7 @@ impl Default for DBOptions {
                 inner: opts,
                 env: None,
                 titan_inner: ptr::null_mut::<DBTitanDBOptions>(),
+                comparator: None,
             }
         }
     }
@@ -730,6 +768,7 @@ impl Clone for DBOptions {
                 inner: opts,
                 env: self.env.clone(),
                 titan_inner: titan_opts,
+                comparator: None,
             }
         }
     }
@@ -749,6 +788,7 @@ impl DBOptions {
             inner: inner,
             env: None,
             titan_inner: ptr::null_mut::<DBTitanDBOptions>(),
+            comparator: None,
         }
     }
 
@@ -1319,6 +1359,24 @@ impl DBOptions {
             Some(CStr::from_ptr(memtable_name).to_str().unwrap())
         }
     }
+
+    pub fn add_timestamp_aware_comparator<S: Into<Vec<u8>>, C: TimestampAwareComparator>(
+        &mut self,
+        name: S,
+        ts_sz: usize,
+        timestamp_aware_comparator: C,
+    ) -> Result<(), String> {
+        unsafe {
+            let comparator = comparator::new_timestamp_aware_comparator(
+                name,
+                ts_sz,
+                timestamp_aware_comparator,
+            )?;
+            crocksdb_ffi::crocksdb_options_set_comparator(self.inner, comparator.inner);
+            self.comparator = Some(comparator);
+            Ok(())
+        }
+    }
 }
 
 pub struct ColumnFamilyOptions {
@@ -1326,6 +1384,7 @@ pub struct ColumnFamilyOptions {
     pub titan_inner: *mut DBTitanDBOptions,
     env: Option<Arc<Env>>,
     filter: Option<CompactionFilterHandle>,
+    comparator: Option<ComparatorRAIIWrapper>,
 }
 
 impl Drop for ColumnFamilyOptions {
@@ -1352,6 +1411,7 @@ impl Default for ColumnFamilyOptions {
                 titan_inner: ptr::null_mut::<DBTitanDBOptions>(),
                 env: None,
                 filter: None,
+                comparator: None,
             }
         }
     }
@@ -1372,6 +1432,7 @@ impl Clone for ColumnFamilyOptions {
                 titan_inner: titan_opts,
                 env: self.env.clone(),
                 filter: None,
+                comparator: None,
             }
         }
     }
@@ -1395,6 +1456,7 @@ impl ColumnFamilyOptions {
             titan_inner,
             env: None,
             filter: None,
+            comparator: None,
         }
     }
 
@@ -1581,20 +1643,43 @@ impl ColumnFamilyOptions {
     }
 
     pub fn add_comparator(&mut self, name: &str, compare_fn: fn(&[u8], &[u8]) -> i32) {
-        let cb = Box::new(ComparatorCallback {
+        let cb = Box::into_raw(Box::new(ComparatorCallback {
             name: CString::new(name.as_bytes()).unwrap(),
-            f: compare_fn,
-        });
-        let cb = Box::into_raw(cb) as *mut c_void;
+            compare_fn: compare_fn,
+        })) as *mut c_void;
 
         unsafe {
-            let cmp = crocksdb_ffi::crocksdb_comparator_create(
+            let db_comparator = crocksdb_ffi::crocksdb_comparator_create(
                 cb,
+                0,
                 comparator::destructor_callback,
                 compare_callback,
+                None,
+                None,
                 comparator::name_callback,
             );
-            crocksdb_ffi::crocksdb_options_set_comparator(self.inner, cmp);
+            self.comparator = Some(ComparatorRAIIWrapper {
+                inner: db_comparator,
+            });
+            crocksdb_ffi::crocksdb_options_set_comparator(self.inner, db_comparator);
+        }
+    }
+
+    pub fn add_timestamp_aware_comparator<S: Into<Vec<u8>>, C: TimestampAwareComparator>(
+        &mut self,
+        name: S,
+        ts_sz: usize,
+        timestamp_aware_comparator: C,
+    ) -> Result<(), String> {
+        unsafe {
+            let comparator = comparator::new_timestamp_aware_comparator(
+                name,
+                ts_sz,
+                timestamp_aware_comparator,
+            )?;
+            crocksdb_ffi::crocksdb_options_set_comparator(self.inner, comparator.inner);
+            self.comparator = Some(comparator);
+            Ok(())
         }
     }
 

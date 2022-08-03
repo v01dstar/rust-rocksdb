@@ -350,6 +350,17 @@ extern C_ROCKSDB_LIBRARY_API void crocksdb_put_cf(
     crocksdb_column_family_handle_t* column_family, const char* key,
     size_t keylen, const char* val, size_t vallen, char** errptr);
 
+extern C_ROCKSDB_LIBRARY_API void crocksdb_put_with_ts(
+    crocksdb_t* db, const crocksdb_writeoptions_t* options, const char* key,
+    size_t keylen, const char* ts, size_t tslen, const char* val, size_t vallen,
+    char** errptr);
+
+extern C_ROCKSDB_LIBRARY_API void crocksdb_put_cf_with_ts(
+    crocksdb_t* db, const crocksdb_writeoptions_t* options,
+    crocksdb_column_family_handle_t* column_family, const char* key,
+    size_t keylen, const char* ts, size_t tslen, const char* val, size_t vallen,
+    char** errptr);
+
 extern C_ROCKSDB_LIBRARY_API void crocksdb_delete(
     crocksdb_t* db, const crocksdb_writeoptions_t* options, const char* key,
     size_t keylen, char** errptr);
@@ -359,6 +370,15 @@ extern C_ROCKSDB_LIBRARY_API void crocksdb_delete_cf(
     crocksdb_column_family_handle_t* column_family, const char* key,
     size_t keylen, char** errptr);
 
+extern C_ROCKSDB_LIBRARY_API void crocksdb_delete_with_ts(
+    crocksdb_t* db, const crocksdb_writeoptions_t* options, const char* key,
+    size_t keylen, const char* ts, size_t tlen, char** errptr);
+
+extern C_ROCKSDB_LIBRARY_API void crocksdb_delete_cf_with_ts(
+    crocksdb_t* db, const crocksdb_writeoptions_t* options,
+    crocksdb_column_family_handle_t* column_family, const char* key,
+    size_t keylen, const char* ts, size_t tlen, char** errptr);
+
 extern C_ROCKSDB_LIBRARY_API void crocksdb_single_delete(
     crocksdb_t* db, const crocksdb_writeoptions_t* options, const char* key,
     size_t keylen, char** errptr);
@@ -367,6 +387,15 @@ extern C_ROCKSDB_LIBRARY_API void crocksdb_single_delete_cf(
     crocksdb_t* db, const crocksdb_writeoptions_t* options,
     crocksdb_column_family_handle_t* column_family, const char* key,
     size_t keylen, char** errptr);
+
+extern C_ROCKSDB_LIBRARY_API void crocksdb_single_delete_with_ts(
+    crocksdb_t* db, const crocksdb_writeoptions_t* options, const char* key,
+    size_t keylen, const char* ts, size_t tlen, char** errptr);
+
+extern C_ROCKSDB_LIBRARY_API void crocksdb_single_delete_cf_with_ts(
+    crocksdb_t* db, const crocksdb_writeoptions_t* options,
+    crocksdb_column_family_handle_t* column_family, const char* key,
+    size_t keylen, const char* ts, size_t tlen, char** errptr);
 
 extern C_ROCKSDB_LIBRARY_API void crocksdb_delete_range_cf(
     crocksdb_t* db, const crocksdb_writeoptions_t* options,
@@ -591,6 +620,8 @@ extern C_ROCKSDB_LIBRARY_API void crocksdb_iter_next(crocksdb_iterator_t*);
 extern C_ROCKSDB_LIBRARY_API void crocksdb_iter_prev(crocksdb_iterator_t*);
 extern C_ROCKSDB_LIBRARY_API const char* crocksdb_iter_key(
     const crocksdb_iterator_t*, size_t* klen);
+extern C_ROCKSDB_LIBRARY_API const char* crocksdb_iter_ts(
+    const crocksdb_iterator_t*, size_t* tlen);
 extern C_ROCKSDB_LIBRARY_API const char* crocksdb_iter_value(
     const crocksdb_iterator_t*, size_t* vlen);
 extern C_ROCKSDB_LIBRARY_API void crocksdb_iter_get_error(
@@ -616,6 +647,10 @@ extern C_ROCKSDB_LIBRARY_API void crocksdb_writebatch_put(
 extern C_ROCKSDB_LIBRARY_API void crocksdb_writebatch_put_cf(
     crocksdb_writebatch_t*, crocksdb_column_family_handle_t* column_family,
     const char* key, size_t klen, const char* val, size_t vlen);
+extern C_ROCKSDB_LIBRARY_API void crocksdb_ritebatch_put_cf_with_ts(
+    crocksdb_writebatch_t*, crocksdb_column_family_handle_t* column_family,
+    const char* key, size_t klen, const char* ts, size_t tlen, const char* val,
+    size_t vlen);
 extern C_ROCKSDB_LIBRARY_API void crocksdb_writebatch_putv(
     crocksdb_writebatch_t* b, int num_keys, const char* const* keys_list,
     const size_t* keys_list_sizes, int num_values,
@@ -645,11 +680,17 @@ extern C_ROCKSDB_LIBRARY_API void crocksdb_writebatch_delete(
 extern C_ROCKSDB_LIBRARY_API void crocksdb_writebatch_delete_cf(
     crocksdb_writebatch_t*, crocksdb_column_family_handle_t* column_family,
     const char* key, size_t klen);
+extern C_ROCKSDB_LIBRARY_API void crocksdb_writebatch_delete_cf_with_ts(
+    crocksdb_writebatch_t*, crocksdb_column_family_handle_t* column_family,
+    const char* key, size_t klen, const char* ts, size_t tlen);
 extern C_ROCKSDB_LIBRARY_API void crocksdb_writebatch_single_delete(
     crocksdb_writebatch_t*, const char* key, size_t klen);
 extern C_ROCKSDB_LIBRARY_API void crocksdb_writebatch_single_delete_cf(
     crocksdb_writebatch_t*, crocksdb_column_family_handle_t* column_family,
     const char* key, size_t klen);
+extern C_ROCKSDB_LIBRARY_API void crocksdb_writebatch_single_delete_cf_with_ts(
+    crocksdb_writebatch_t*, crocksdb_column_family_handle_t* column_family,
+    const char* key, size_t klen, const char* ts, size_t tlen);
 extern C_ROCKSDB_LIBRARY_API void crocksdb_writebatch_deletev(
     crocksdb_writebatch_t* b, int num_keys, const char* const* keys_list,
     const size_t* keys_list_sizes);
@@ -1463,9 +1504,14 @@ extern C_ROCKSDB_LIBRARY_API void crocksdb_compactionfilterfactory_destroy(
 /* Comparator */
 
 extern C_ROCKSDB_LIBRARY_API crocksdb_comparator_t* crocksdb_comparator_create(
-    void* state, void (*destructor)(void*),
+    void* state, size_t ts_sz, void (*destructor)(void*),
     int (*compare)(void*, const char* a, size_t alen, const char* b,
                    size_t blen),
+    int (*compare_ts_)(void*, const char* a_ts, size_t a_tslen,
+                       const char* b_ts, size_t b_tslen),
+    int (*compare_without_ts_)(void*, const char* a, size_t alen,
+                               unsigned char a_has_ts, const char* b,
+                               size_t blen, unsigned char b_has_ts),
     const char* (*name)(void*));
 extern C_ROCKSDB_LIBRARY_API void crocksdb_comparator_destroy(
     crocksdb_comparator_t*);
@@ -1557,6 +1603,10 @@ extern C_ROCKSDB_LIBRARY_API void crocksdb_readoptions_set_table_filter(
     crocksdb_readoptions_t*, void*,
     unsigned char (*table_filter)(void*, const crocksdb_table_properties_t*),
     void (*destory)(void*));
+extern C_ROCKSDB_LIBRARY_API void crocksdb_readoptions_set_timestamp(
+    crocksdb_readoptions_t*, const char* ts, size_t tslen);
+extern C_ROCKSDB_LIBRARY_API void crocksdb_readoptions_set_iter_start_ts(
+    crocksdb_readoptions_t*, const char* ts, size_t tslen);
 
 /* Write options */
 
@@ -1800,12 +1850,19 @@ extern C_ROCKSDB_LIBRARY_API void crocksdb_sstfilewriter_open(
 extern C_ROCKSDB_LIBRARY_API void crocksdb_sstfilewriter_put(
     crocksdb_sstfilewriter_t* writer, const char* key, size_t keylen,
     const char* val, size_t vallen, char** errptr);
+extern C_ROCKSDB_LIBRARY_API void crocksdb_sstfilewriter_put_with_ts(
+    crocksdb_sstfilewriter_t* writer, const char* key, size_t keylen,
+    const char* ts, size_t tslen, const char* val, size_t vallen,
+    char** errptr);
 extern C_ROCKSDB_LIBRARY_API void crocksdb_sstfilewriter_merge(
     crocksdb_sstfilewriter_t* writer, const char* key, size_t keylen,
     const char* val, size_t vallen, char** errptr);
 extern C_ROCKSDB_LIBRARY_API void crocksdb_sstfilewriter_delete(
     crocksdb_sstfilewriter_t* writer, const char* key, size_t keylen,
     char** errptr);
+extern C_ROCKSDB_LIBRARY_API void crocksdb_sstfilewriter_delete_with_ts(
+    crocksdb_sstfilewriter_t* writer, const char* key, size_t keylen,
+    const char* ts, size_t tslen, char** errptr);
 extern C_ROCKSDB_LIBRARY_API void crocksdb_sstfilewriter_delete_range(
     crocksdb_sstfilewriter_t* writer, const char* begin_key,
     size_t begin_keylen, const char* end_key, size_t end_keylen, char** errptr);
@@ -1991,6 +2048,11 @@ extern C_ROCKSDB_LIBRARY_API crocksdb_pinnableslice_t* crocksdb_get_pinned_cf(
     crocksdb_t* db, const crocksdb_readoptions_t* options,
     crocksdb_column_family_handle_t* column_family, const char* key,
     size_t keylen, char** errptr);
+extern C_ROCKSDB_LIBRARY_API crocksdb_pinnableslice_t*
+crocksdb_get_pinned_cf_ts(crocksdb_t* db, const crocksdb_readoptions_t* options,
+                          crocksdb_column_family_handle_t* column_family,
+                          const char* key, size_t keylen, char** ts,
+                          size_t* tslen, char** errptr);
 extern C_ROCKSDB_LIBRARY_API void crocksdb_pinnableslice_destroy(
     crocksdb_pinnableslice_t* v);
 extern C_ROCKSDB_LIBRARY_API const char* crocksdb_pinnableslice_value(

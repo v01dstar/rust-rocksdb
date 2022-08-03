@@ -290,8 +290,34 @@ impl<D> DBIterator<D> {
         let mut key_len: size_t = 0;
         let key_len_ptr: *mut size_t = &mut key_len;
         unsafe {
-            let key_ptr = crocksdb_ffi::crocksdb_iter_key(self.inner, key_len_ptr);
-            slice::from_raw_parts(key_ptr, key_len as usize)
+            if self._readopts.get_iter_start_ts().len() > 0 {
+                let key_ptr = crocksdb_ffi::crocksdb_iter_key(self.inner, key_len_ptr);
+                slice::from_raw_parts(key_ptr, key_len as usize - 16)
+            } else {
+                let key_ptr = crocksdb_ffi::crocksdb_iter_key(self.inner, key_len_ptr);
+                slice::from_raw_parts(key_ptr, key_len as usize)
+            }
+        }
+    }
+
+    pub fn ts(&self) -> Option<&[u8]> {
+        if self._readopts.get_timestamp().len() == 0 {
+            return None;
+        }
+        debug_assert_eq!(self.valid(), Ok(true));
+        let mut ts_len: size_t = 0;
+        let ts_len_ptr: *mut size_t = &mut ts_len;
+        unsafe {
+            if self._readopts.get_iter_start_ts().len() > 0 {
+                let user_key_ptr = crocksdb_ffi::crocksdb_iter_key(self.inner, ts_len_ptr);
+                Some(slice::from_raw_parts(
+                    user_key_ptr.offset(ts_len as isize - 16),
+                    8,
+                ))
+            } else {
+                let ts_ptr = crocksdb_ffi::crocksdb_iter_ts(self.inner, ts_len_ptr);
+                Some(slice::from_raw_parts(ts_ptr, ts_len as usize))
+            }
         }
     }
 
@@ -450,12 +476,24 @@ impl<D: Deref<Target = DB>> Drop for Snapshot<D> {
 pub trait Writable {
     fn put(&self, key: &[u8], value: &[u8]) -> Result<(), String>;
     fn put_cf(&self, cf: &CFHandle, key: &[u8], value: &[u8]) -> Result<(), String>;
+    fn put_with_ts(&self, key: &[u8], ts: &[u8], value: &[u8]) -> Result<(), String>;
+    fn put_cf_with_ts(
+        &self,
+        cf: &CFHandle,
+        key: &[u8],
+        ts: &[u8],
+        value: &[u8],
+    ) -> Result<(), String>;
     fn merge(&self, key: &[u8], value: &[u8]) -> Result<(), String>;
     fn merge_cf(&self, cf: &CFHandle, key: &[u8], value: &[u8]) -> Result<(), String>;
     fn delete(&self, key: &[u8]) -> Result<(), String>;
     fn delete_cf(&self, cf: &CFHandle, key: &[u8]) -> Result<(), String>;
+    fn delete_with_ts(&self, key: &[u8], ts: &[u8]) -> Result<(), String>;
+    fn delete_cf_with_ts(&self, cf: &CFHandle, key: &[u8], ts: &[u8]) -> Result<(), String>;
     fn single_delete(&self, key: &[u8]) -> Result<(), String>;
     fn single_delete_cf(&self, cf: &CFHandle, key: &[u8]) -> Result<(), String>;
+    fn single_delete_with_ts(&self, key: &[u8], ts: &[u8]) -> Result<(), String>;
+    fn single_delete_cf_with_ts(&self, cf: &CFHandle, key: &[u8], ts: &[u8]) -> Result<(), String>;
     fn delete_range(&self, begin_key: &[u8], end_key: &[u8]) -> Result<(), String>;
     fn delete_range_cf(
         &self,
@@ -891,6 +929,33 @@ impl DB {
         }
     }
 
+    pub fn get_cf_opt_ts(
+        &self,
+        cf: &CFHandle,
+        key: &[u8],
+        readopts: &ReadOptions,
+    ) -> Result<Option<(DBVector, Vec<u8>)>, String> {
+        unsafe {
+            let mut ts_ptr = std::ptr::null_mut();
+            let mut ts_len: size_t = 0;
+            let val = ffi_try!(crocksdb_get_pinned_cf_ts(
+                self.inner,
+                readopts.get_inner(),
+                cf.inner,
+                key.as_ptr(),
+                key.len() as size_t,
+                &mut ts_ptr,
+                &mut ts_len
+            ));
+            if val.is_null() {
+                Ok(None)
+            } else {
+                let mut ts = Vec::from_raw_parts(ts_ptr as *mut u8, ts_len, ts_len);
+                Ok(Some((DBVector::from_pinned_slice(val), ts.into())))
+            }
+        }
+    }
+
     pub fn get_cf(&self, cf: &CFHandle, key: &[u8]) -> Result<Option<DBVector>, String> {
         self.get_cf_opt(cf, key, &ReadOptions::new())
     }
@@ -1051,6 +1116,53 @@ impl DB {
             Ok(())
         }
     }
+
+    pub fn put_opt_with_ts(
+        &self,
+        key: &[u8],
+        ts: &[u8],
+        value: &[u8],
+        writeopts: &WriteOptions,
+    ) -> Result<(), String> {
+        unsafe {
+            ffi_try!(crocksdb_put_with_ts(
+                self.inner,
+                writeopts.inner,
+                key.as_ptr(),
+                key.len() as size_t,
+                ts.as_ptr(),
+                ts.len() as size_t,
+                value.as_ptr(),
+                value.len() as size_t
+            ));
+            Ok(())
+        }
+    }
+
+    pub fn put_cf_opt_with_ts(
+        &self,
+        cf: &CFHandle,
+        key: &[u8],
+        ts: &[u8],
+        value: &[u8],
+        writeopts: &WriteOptions,
+    ) -> Result<(), String> {
+        unsafe {
+            ffi_try!(crocksdb_put_cf_with_ts(
+                self.inner,
+                writeopts.inner,
+                cf.inner,
+                key.as_ptr(),
+                key.len() as size_t,
+                ts.as_ptr(),
+                ts.len() as size_t,
+                value.as_ptr(),
+                value.len() as size_t
+            ));
+            Ok(())
+        }
+    }
+
     pub fn merge_opt(
         &self,
         key: &[u8],
@@ -1089,6 +1201,7 @@ impl DB {
             Ok(())
         }
     }
+
     fn delete_opt(&self, key: &[u8], writeopts: &WriteOptions) -> Result<(), String> {
         unsafe {
             ffi_try!(crocksdb_delete(
@@ -1119,6 +1232,46 @@ impl DB {
         }
     }
 
+    fn delete_opt_with_ts(
+        &self,
+        key: &[u8],
+        ts: &[u8],
+        writeopts: &WriteOptions,
+    ) -> Result<(), String> {
+        unsafe {
+            ffi_try!(crocksdb_delete_with_ts(
+                self.inner,
+                writeopts.inner,
+                key.as_ptr(),
+                key.len() as size_t,
+                ts.as_ptr(),
+                ts.len() as size_t
+            ));
+            Ok(())
+        }
+    }
+
+    fn delete_cf_opt_with_ts(
+        &self,
+        cf: &CFHandle,
+        key: &[u8],
+        ts: &[u8],
+        writeopts: &WriteOptions,
+    ) -> Result<(), String> {
+        unsafe {
+            ffi_try!(crocksdb_delete_cf_with_ts(
+                self.inner,
+                writeopts.inner,
+                cf.inner,
+                key.as_ptr(),
+                key.len() as size_t,
+                ts.as_ptr(),
+                ts.len() as size_t
+            ));
+            Ok(())
+        }
+    }
+
     fn single_delete_opt(&self, key: &[u8], writeopts: &WriteOptions) -> Result<(), String> {
         unsafe {
             ffi_try!(crocksdb_single_delete(
@@ -1144,6 +1297,46 @@ impl DB {
                 cf.inner,
                 key.as_ptr(),
                 key.len() as size_t
+            ));
+            Ok(())
+        }
+    }
+
+    fn single_delete_opt_with_ts(
+        &self,
+        key: &[u8],
+        ts: &[u8],
+        writeopts: &WriteOptions,
+    ) -> Result<(), String> {
+        unsafe {
+            ffi_try!(crocksdb_single_delete_with_ts(
+                self.inner,
+                writeopts.inner,
+                key.as_ptr(),
+                key.len() as size_t,
+                ts.as_ptr(),
+                ts.len() as size_t
+            ));
+            Ok(())
+        }
+    }
+
+    fn single_delete_cf_opt_with_ts(
+        &self,
+        cf: &CFHandle,
+        key: &[u8],
+        ts: &[u8],
+        writeopts: &WriteOptions,
+    ) -> Result<(), String> {
+        unsafe {
+            ffi_try!(crocksdb_single_delete_cf_with_ts(
+                self.inner,
+                writeopts.inner,
+                cf.inner,
+                key.as_ptr(),
+                key.len() as size_t,
+                ts.as_ptr(),
+                ts.len() as size_t
             ));
             Ok(())
         }
@@ -2029,6 +2222,20 @@ impl Writable for DB {
         self.put_cf_opt(cf, key, value, &WriteOptions::new())
     }
 
+    fn put_with_ts(&self, key: &[u8], ts: &[u8], value: &[u8]) -> Result<(), String> {
+        self.put_opt_with_ts(key, ts, value, &WriteOptions::new())
+    }
+
+    fn put_cf_with_ts(
+        &self,
+        cf: &CFHandle,
+        key: &[u8],
+        ts: &[u8],
+        value: &[u8],
+    ) -> Result<(), String> {
+        self.put_cf_opt_with_ts(cf, key, ts, value, &WriteOptions::new())
+    }
+
     fn merge(&self, key: &[u8], value: &[u8]) -> Result<(), String> {
         self.merge_opt(key, value, &WriteOptions::new())
     }
@@ -2045,12 +2252,28 @@ impl Writable for DB {
         self.delete_cf_opt(cf, key, &WriteOptions::new())
     }
 
+    fn delete_with_ts(&self, key: &[u8], ts: &[u8]) -> Result<(), String> {
+        self.delete_opt_with_ts(key, ts, &WriteOptions::new())
+    }
+
+    fn delete_cf_with_ts(&self, cf: &CFHandle, key: &[u8], ts: &[u8]) -> Result<(), String> {
+        self.delete_cf_opt_with_ts(cf, key, ts, &WriteOptions::new())
+    }
+
     fn single_delete(&self, key: &[u8]) -> Result<(), String> {
         self.single_delete_opt(key, &WriteOptions::new())
     }
 
     fn single_delete_cf(&self, cf: &CFHandle, key: &[u8]) -> Result<(), String> {
         self.single_delete_cf_opt(cf, key, &WriteOptions::new())
+    }
+
+    fn single_delete_with_ts(&self, key: &[u8], ts: &[u8]) -> Result<(), String> {
+        self.single_delete_opt_with_ts(key, ts, &WriteOptions::new())
+    }
+
+    fn single_delete_cf_with_ts(&self, cf: &CFHandle, key: &[u8], ts: &[u8]) -> Result<(), String> {
+        self.single_delete_cf_opt_with_ts(cf, key, ts, &WriteOptions::new())
     }
 
     fn delete_range(&self, begin_key: &[u8], end_key: &[u8]) -> Result<(), String> {
@@ -2112,6 +2335,32 @@ impl Writable for WriteBatch {
         }
     }
 
+    fn put_with_ts(&self, _key: &[u8], _ts: &[u8], _value: &[u8]) -> Result<(), String> {
+        unimplemented!("Rocksdb write batch only supports put_cf with timestamp.");
+    }
+
+    fn put_cf_with_ts(
+        &self,
+        cf: &CFHandle,
+        key: &[u8],
+        ts: &[u8],
+        value: &[u8],
+    ) -> Result<(), String> {
+        unsafe {
+            crocksdb_ffi::crocksdb_writebatch_put_cf_with_ts(
+                self.inner,
+                cf.inner,
+                key.as_ptr(),
+                key.len() as size_t,
+                ts.as_ptr(),
+                ts.len() as size_t,
+                value.as_ptr(),
+                value.len() as size_t,
+            );
+            Ok(())
+        }
+    }
+
     fn merge(&self, key: &[u8], value: &[u8]) -> Result<(), String> {
         unsafe {
             crocksdb_ffi::crocksdb_writebatch_merge(
@@ -2158,6 +2407,24 @@ impl Writable for WriteBatch {
         }
     }
 
+    fn delete_with_ts(&self, _key: &[u8], _ts: &[u8]) -> Result<(), String> {
+        unimplemented!("Rocksdb write batch only supports delete_cf with timestamp.");
+    }
+
+    fn delete_cf_with_ts(&self, cf: &CFHandle, key: &[u8], ts: &[u8]) -> Result<(), String> {
+        unsafe {
+            crocksdb_ffi::crocksdb_writebatch_delete_cf_with_ts(
+                self.inner,
+                cf.inner,
+                key.as_ptr(),
+                key.len() as size_t,
+                ts.as_ptr(),
+                ts.len() as size_t,
+            );
+            Ok(())
+        }
+    }
+
     fn single_delete(&self, key: &[u8]) -> Result<(), String> {
         unsafe {
             crocksdb_ffi::crocksdb_writebatch_single_delete(
@@ -2176,6 +2443,24 @@ impl Writable for WriteBatch {
                 cf.inner,
                 key.as_ptr(),
                 key.len() as size_t,
+            );
+            Ok(())
+        }
+    }
+
+    fn single_delete_with_ts(&self, _key: &[u8], _ts: &[u8]) -> Result<(), String> {
+        unimplemented!("Rocksdb write batch only supports single_delete_cf with timestamp.");
+    }
+
+    fn single_delete_cf_with_ts(&self, cf: &CFHandle, key: &[u8], ts: &[u8]) -> Result<(), String> {
+        unsafe {
+            crocksdb_ffi::crocksdb_writebatch_single_delete_cf_with_ts(
+                self.inner,
+                cf.inner,
+                key.as_ptr(),
+                key.len() as size_t,
+                ts.as_ptr(),
+                ts.len() as size_t,
             );
             Ok(())
         }
@@ -2463,6 +2748,21 @@ impl SstFileWriter {
         }
     }
 
+    pub fn put_with_ts(&mut self, key: &[u8], ts: &[u8], val: &[u8]) -> Result<(), String> {
+        unsafe {
+            ffi_try!(crocksdb_sstfilewriter_put_with_ts(
+                self.inner,
+                key.as_ptr(),
+                key.len(),
+                ts.as_ptr(),
+                ts.len(),
+                val.as_ptr(),
+                val.len()
+            ));
+            Ok(())
+        }
+    }
+
     pub fn merge(&mut self, key: &[u8], val: &[u8]) -> Result<(), String> {
         unsafe {
             ffi_try!(crocksdb_sstfilewriter_merge(
@@ -2482,6 +2782,19 @@ impl SstFileWriter {
                 self.inner,
                 key.as_ptr(),
                 key.len()
+            ));
+            Ok(())
+        }
+    }
+
+    pub fn delete_with_ts(&mut self, key: &[u8], ts: &[u8]) -> Result<(), String> {
+        unsafe {
+            ffi_try!(crocksdb_sstfilewriter_delete_with_ts(
+                self.inner,
+                key.as_ptr(),
+                key.len(),
+                ts.as_ptr(),
+                ts.len()
             ));
             Ok(())
         }

@@ -8,5 +8,5 @@ export UPDATE_BIND=1
 if [ "$ARCH" == "" ]; then
     ARCH=`uname -m`
 fi
-cargo build  --target ${ARCH}-unknown-linux-gnu
+cargo +nightly build  --target ${ARCH}-unknown-linux-gnu
 rustfmt librocksdb_sys/bindings/*

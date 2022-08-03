@@ -1011,6 +1011,29 @@ extern "C" {
         vLen: size_t,
         err: *mut *mut c_char,
     );
+    pub fn crocksdb_put_with_ts(
+        db: *mut DBInstance,
+        writeopts: *mut DBWriteOptions,
+        k: *const u8,
+        kLen: size_t,
+        t: *const u8,
+        tLen: size_t,
+        v: *const u8,
+        vLen: size_t,
+        err: *mut *mut c_char,
+    );
+    pub fn crocksdb_put_cf_with_ts(
+        db: *mut DBInstance,
+        writeopts: *mut DBWriteOptions,
+        cf: *mut DBCFHandle,
+        k: *const u8,
+        kLen: size_t,
+        t: *const u8,
+        tLen: size_t,
+        v: *const u8,
+        vLen: size_t,
+        err: *mut *mut c_char,
+    );
     pub fn crocksdb_readoptions_create() -> *mut DBReadOptions;
     pub fn crocksdb_readoptions_destroy(readopts: *mut DBReadOptions);
     pub fn crocksdb_readoptions_set_verify_checksums(readopts: *mut DBReadOptions, v: bool);
@@ -1052,6 +1075,16 @@ extern "C" {
         ctx: *mut c_void,
         filter: extern "C" fn(*mut c_void, *const DBTableProperties) -> c_uchar,
         destroy: extern "C" fn(*mut c_void),
+    );
+    pub fn crocksdb_readoptions_set_timestamp(
+        readopts: *mut DBReadOptions,
+        ts: *const u8,
+        tsLen: size_t,
+    );
+    pub fn crocksdb_readoptions_set_iter_start_ts(
+        readopts: *mut DBReadOptions,
+        ts: *const u8,
+        tsLen: size_t,
     );
 
     pub fn crocksdb_get(
@@ -1099,6 +1132,25 @@ extern "C" {
         kLen: size_t,
         err: *mut *mut c_char,
     );
+    pub fn crocksdb_delete_with_ts(
+        db: *mut DBInstance,
+        writeopts: *const DBWriteOptions,
+        k: *const u8,
+        kLen: size_t,
+        ts: *const u8,
+        tLen: size_t,
+        err: *mut *mut c_char,
+    );
+    pub fn crocksdb_delete_cf_with_ts(
+        db: *mut DBInstance,
+        writeopts: *const DBWriteOptions,
+        cf: *mut DBCFHandle,
+        k: *const u8,
+        kLen: size_t,
+        ts: *const u8,
+        tLen: size_t,
+        err: *mut *mut c_char,
+    );
     pub fn crocksdb_single_delete(
         db: *mut DBInstance,
         writeopts: *const DBWriteOptions,
@@ -1112,6 +1164,25 @@ extern "C" {
         cf: *mut DBCFHandle,
         k: *const u8,
         kLen: size_t,
+        err: *mut *mut c_char,
+    );
+    pub fn crocksdb_single_delete_with_ts(
+        db: *mut DBInstance,
+        writeopts: *const DBWriteOptions,
+        k: *const u8,
+        kLen: size_t,
+        ts: *const u8,
+        tLen: size_t,
+        err: *mut *mut c_char,
+    );
+    pub fn crocksdb_single_delete_cf_with_ts(
+        db: *mut DBInstance,
+        writeopts: *const DBWriteOptions,
+        cf: *mut DBCFHandle,
+        k: *const u8,
+        kLen: size_t,
+        ts: *const u8,
+        tLen: size_t,
         err: *mut *mut c_char,
     );
     pub fn crocksdb_delete_range_cf(
@@ -1191,6 +1262,7 @@ extern "C" {
     pub fn crocksdb_iter_next(iter: *mut DBIterator);
     pub fn crocksdb_iter_prev(iter: *mut DBIterator);
     pub fn crocksdb_iter_key(iter: *const DBIterator, klen: *mut size_t) -> *mut u8;
+    pub fn crocksdb_iter_ts(iter: *const DBIterator, tlen: *mut size_t) -> *mut u8;
     pub fn crocksdb_iter_value(iter: *const DBIterator, vlen: *mut size_t) -> *mut u8;
     pub fn crocksdb_iter_seqno(iter: *const DBIterator, seqno: *mut u64) -> bool;
     pub fn crocksdb_iter_get_error(iter: *const DBIterator, err: *mut *mut c_char);
@@ -1237,6 +1309,16 @@ extern "C" {
         val: *const u8,
         vlen: size_t,
     );
+    pub fn crocksdb_writebatch_put_cf_with_ts(
+        batch: *mut DBWriteBatch,
+        cf: *mut DBCFHandle,
+        key: *const u8,
+        klen: size_t,
+        ts: *const u8,
+        tlen: size_t,
+        val: *const u8,
+        vlen: size_t,
+    );
     pub fn crocksdb_writebatch_merge(
         batch: *mut DBWriteBatch,
         key: *const u8,
@@ -1259,6 +1341,14 @@ extern "C" {
         key: *const u8,
         klen: size_t,
     );
+    pub fn crocksdb_writebatch_delete_cf_with_ts(
+        batch: *mut DBWriteBatch,
+        cf: *mut DBCFHandle,
+        key: *const u8,
+        klen: size_t,
+        ts: *const u8,
+        tlen: size_t,
+    );
     pub fn crocksdb_writebatch_single_delete(
         batch: *mut DBWriteBatch,
         key: *const u8,
@@ -1269,6 +1359,14 @@ extern "C" {
         cf: *mut DBCFHandle,
         key: *const u8,
         klen: size_t,
+    );
+    pub fn crocksdb_writebatch_single_delete_cf_with_ts(
+        batch: *mut DBWriteBatch,
+        cf: *mut DBCFHandle,
+        key: *const u8,
+        klen: size_t,
+        ts: *const u8,
+        tlen: size_t,
     );
     pub fn crocksdb_writebatch_delete_range(
         batch: *mut DBWriteBatch,
@@ -1363,6 +1461,7 @@ extern "C" {
     pub fn crocksdb_options_set_comparator(options: *mut Options, cb: *mut DBComparator);
     pub fn crocksdb_comparator_create(
         state: *mut c_void,
+        ts_sz: size_t,
         destroy: unsafe extern "C" fn(*mut c_void) -> (),
         compare: unsafe extern "C" fn(
             arg: *mut c_void,
@@ -1371,6 +1470,26 @@ extern "C" {
             b: *const c_char,
             blen: size_t,
         ) -> c_int,
+        compare_ts: Option<
+            unsafe extern "C" fn(
+                arg: *mut c_void,
+                a: *const c_char,
+                alen: size_t,
+                b: *const c_char,
+                blen: size_t,
+            ) -> c_int,
+        >,
+        compare_without_ts: Option<
+            unsafe extern "C" fn(
+                arg: *mut c_void,
+                a: *const c_char,
+                alen: size_t,
+                a_has_ts: c_uchar,
+                b: *const c_char,
+                blen: size_t,
+                b_has_ts: c_uchar,
+            ) -> c_int,
+        >,
         name_fn: unsafe extern "C" fn(*mut c_void) -> *const c_char,
     ) -> *mut DBComparator;
     pub fn crocksdb_comparator_destroy(cmp: *mut DBComparator);
@@ -1893,6 +2012,16 @@ extern "C" {
         val_len: size_t,
         err: *mut *mut c_char,
     );
+    pub fn crocksdb_sstfilewriter_put_with_ts(
+        writer: *mut SstFileWriter,
+        key: *const u8,
+        key_len: size_t,
+        ts: *const u8,
+        ts_len: size_t,
+        val: *const u8,
+        val_len: size_t,
+        err: *mut *mut c_char,
+    );
     pub fn crocksdb_sstfilewriter_merge(
         writer: *mut SstFileWriter,
         key: *const u8,
@@ -1905,6 +2034,14 @@ extern "C" {
         writer: *mut SstFileWriter,
         key: *const u8,
         key_len: size_t,
+        err: *mut *mut c_char,
+    );
+    pub fn crocksdb_sstfilewriter_delete_with_ts(
+        writer: *mut SstFileWriter,
+        key: *const u8,
+        key_len: size_t,
+        ts: *const u8,
+        ts_len: size_t,
         err: *mut *mut c_char,
     );
     pub fn crocksdb_sstfilewriter_delete_range(
@@ -2027,6 +2164,16 @@ extern "C" {
         cf_handle: *mut DBCFHandle,
         k: *const u8,
         kLen: size_t,
+        err: *mut *mut c_char,
+    ) -> *mut DBPinnableSlice;
+    pub fn crocksdb_get_pinned_cf_ts(
+        db: *mut DBInstance,
+        readopts: *const DBReadOptions,
+        cf_handle: *mut DBCFHandle,
+        k: *const u8,
+        kLen: size_t,
+        ts: *mut *mut c_char,
+        tsLen: *mut size_t,
         err: *mut *mut c_char,
     ) -> *mut DBPinnableSlice;
     pub fn crocksdb_pinnableslice_value(

@@ -2979,6 +2979,7 @@ extern "C" {
     pub fn ctitandb_options_set_discardable_ratio(opts: *mut DBTitanDBOptions, ratio: f64);
     pub fn ctitandb_options_set_merge_small_file_threshold(opts: *mut DBTitanDBOptions, size: u64);
     pub fn ctitandb_options_set_blob_run_mode(opts: *mut DBTitanDBOptions, t: DBTitanDBBlobRunMode);
+    pub fn ctitandb_options_set_enable_punch_hole_gc(opts: *mut DBTitanDBOptions, enable: bool);
 
     pub fn ctitandb_readoptions_set_key_only(opts: *mut DBTitanReadOptions, v: bool);
 

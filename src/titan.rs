@@ -148,6 +148,12 @@ impl TitanDBOptions {
             crocksdb_ffi::ctitandb_options_set_blob_run_mode(self.inner, t);
         }
     }
+
+    pub fn set_enable_punch_hole_gc(&mut self, enable: bool) {
+        unsafe {
+            crocksdb_ffi::ctitandb_options_set_enable_punch_hole_gc(self.inner, enable);
+        }
+    }
 }
 
 impl Drop for TitanDBOptions {

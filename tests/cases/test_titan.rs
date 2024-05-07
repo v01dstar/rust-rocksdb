@@ -115,6 +115,7 @@ fn test_titandb() {
     tdb_opts.set_level_merge(false);
     tdb_opts.set_range_merge(false);
     tdb_opts.set_max_sorted_runs(20);
+    tdb_opts.set_enable_punch_hole_gc(true);
 
     let mut opts = DBOptions::new();
     opts.create_if_missing(true);

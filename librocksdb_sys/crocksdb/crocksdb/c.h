@@ -2797,6 +2797,9 @@ extern C_ROCKSDB_LIBRARY_API void ctitandb_options_set_discardable_ratio(
 extern void C_ROCKSDB_LIBRARY_API
 ctitandb_options_set_blob_run_mode(ctitandb_options_t* options, uint32_t mode);
 
+extern unsigned char C_ROCKSDB_LIBRARY_API
+ctitandb_options_enable_punch_hole_gc(ctitandb_options_t* options);
+
 extern void C_ROCKSDB_LIBRARY_API ctitandb_options_set_enable_punch_hole_gc(
     ctitandb_options_t* options, unsigned char enable);
 

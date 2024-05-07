@@ -2979,6 +2979,7 @@ extern "C" {
     pub fn ctitandb_options_set_discardable_ratio(opts: *mut DBTitanDBOptions, ratio: f64);
     pub fn ctitandb_options_set_merge_small_file_threshold(opts: *mut DBTitanDBOptions, size: u64);
     pub fn ctitandb_options_set_blob_run_mode(opts: *mut DBTitanDBOptions, t: DBTitanDBBlobRunMode);
+    pub fn ctitandb_options_enable_punch_hole_gc(opts: *mut DBTitanDBOptions) -> bool;
     pub fn ctitandb_options_set_enable_punch_hole_gc(opts: *mut DBTitanDBOptions, enable: bool);
 
     pub fn ctitandb_readoptions_set_key_only(opts: *mut DBTitanReadOptions, v: bool);
@@ -3274,6 +3275,17 @@ mod test {
             crocksdb_sstfilewriter_destroy(writer);
             crocksdb_options_destroy(io_options);
             crocksdb_envoptions_destroy(env_opt);
+        }
+    }
+
+    #[test]
+    fn test_titan_options() {
+        unsafe {
+            let titan_opts = ctitandb_options_create();
+            assert!(!ctitandb_options_enable_punch_hole_gc(titan_opts));
+            ctitandb_options_set_enable_punch_hole_gc(titan_opts, true);
+            assert!(ctitandb_options_enable_punch_hole_gc(titan_opts));
+            ctitandb_options_destroy(titan_opts);
         }
     }
 }

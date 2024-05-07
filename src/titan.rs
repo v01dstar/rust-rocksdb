@@ -149,6 +149,10 @@ impl TitanDBOptions {
         }
     }
 
+    pub fn enable_punch_hole_gc(&self) -> bool {
+        unsafe { crocksdb_ffi::ctitandb_options_enable_punch_hole_gc(self.inner) }
+    }
+
     pub fn set_enable_punch_hole_gc(&mut self, enable: bool) {
         unsafe {
             crocksdb_ffi::ctitandb_options_set_enable_punch_hole_gc(self.inner, enable);

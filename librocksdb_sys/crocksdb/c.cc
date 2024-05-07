@@ -7038,9 +7038,14 @@ void ctitandb_options_set_blob_run_mode(ctitandb_options_t* options,
   options->rep.blob_run_mode = static_cast<TitanBlobRunMode>(mode);
 }
 
+unsigned char ctitandb_options_enable_punch_hole_gc(
+    ctitandb_options_t* options) {
+  return options->rep.enable_punch_hole_gc;
+}
+
 void ctitandb_options_set_enable_punch_hole_gc(ctitandb_options_t* options,
                                                unsigned char enable) {
-  options->rep.hole_punching_gc = enable;
+  options->rep.enable_punch_hole_gc = enable;
 }
 
 /* TitanReadOptions */

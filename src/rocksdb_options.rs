@@ -24,7 +24,7 @@ use crocksdb_ffi::{
     DBFlushOptions, DBInfoLogLevel, DBInstance, DBLRUCacheOptions, DBRateLimiter,
     DBRateLimiterMode, DBReadOptions, DBRecoveryMode, DBRestoreOptions, DBSnapshot, DBStatistics,
     DBStatisticsHistogramType, DBStatisticsTickerType, DBTitanDBOptions, DBTitanReadOptions,
-    DBWriteBufferManager, DBWriteOptions, IndexType, Options, PrepopulateBlockCache,
+    DBWriteOptions, IndexType, Options, PrepopulateBlockCache,
 };
 use event_listener::{new_event_listener, EventListener};
 use libc::{self, c_double, c_int, c_uchar, c_void, size_t};
@@ -432,55 +432,6 @@ impl Drop for Statistics {
     fn drop(&mut self) {
         unsafe {
             crocksdb_ffi::crocksdb_statistics_destroy(self.inner);
-        }
-    }
-}
-
-pub struct WriteBufferManager {
-    pub(crate) inner: *mut DBWriteBufferManager,
-}
-
-unsafe impl Send for WriteBufferManager {}
-unsafe impl Sync for WriteBufferManager {}
-
-impl WriteBufferManager {
-    pub fn new(flush_size: usize, stall_ratio: f32, flush_oldest_first: bool) -> Self {
-        unsafe {
-            Self {
-                inner: crocksdb_ffi::crocksdb_write_buffer_manager_create(
-                    flush_size,
-                    stall_ratio,
-                    flush_oldest_first,
-                ),
-            }
-        }
-    }
-
-    pub fn set_flush_size(&self, s: usize) {
-        unsafe {
-            crocksdb_ffi::crocksdb_write_buffer_manager_set_flush_size(self.inner, s);
-        }
-    }
-
-    pub fn flush_size(&self) -> usize {
-        unsafe { crocksdb_ffi::crocksdb_write_buffer_manager_flush_size(self.inner) }
-    }
-
-    pub fn set_flush_oldest_first(&self, f: bool) {
-        unsafe {
-            crocksdb_ffi::crocksdb_write_buffer_manager_set_flush_oldest_first(self.inner, f);
-        }
-    }
-
-    pub fn memory_usage(&self) -> usize {
-        unsafe { crocksdb_ffi::crocksdb_write_buffer_manager_memory_usage(self.inner) }
-    }
-}
-
-impl Drop for WriteBufferManager {
-    fn drop(&mut self) {
-        unsafe {
-            crocksdb_ffi::crocksdb_write_buffer_manager_destroy(self.inner);
         }
     }
 }
@@ -1123,12 +1074,6 @@ impl DBOptions {
         }
     }
 
-    pub fn set_write_buffer_manager(&mut self, wbm: &WriteBufferManager) {
-        unsafe {
-            crocksdb_ffi::crocksdb_options_set_write_buffer_manager(self.inner, wbm.inner);
-        }
-    }
-
     pub fn set_statistics(&mut self, s: &Statistics) {
         unsafe {
             crocksdb_ffi::crocksdb_options_set_statistics(self.inner, s.inner);
@@ -1224,16 +1169,6 @@ impl DBOptions {
             None
         } else {
             Some(RateLimiter { inner: limiter })
-        }
-    }
-
-    pub fn get_write_buffer_manager(&self) -> Option<WriteBufferManager> {
-        let manager =
-            unsafe { crocksdb_ffi::crocksdb_options_get_write_buffer_manager(self.inner) };
-        if manager.is_null() {
-            None
-        } else {
-            Some(WriteBufferManager { inner: manager })
         }
     }
 
@@ -2085,22 +2020,6 @@ impl ColumnFamilyOptions {
 
     pub fn get_periodic_compaction_seconds(&self) -> u64 {
         unsafe { crocksdb_ffi::crocksdb_options_get_periodic_compaction_seconds(self.inner) }
-    }
-
-    pub fn set_write_buffer_manager(&mut self, wbm: &WriteBufferManager) {
-        unsafe {
-            crocksdb_ffi::crocksdb_options_set_cf_write_buffer_manager(self.inner, wbm.inner);
-        }
-    }
-
-    pub fn get_write_buffer_manager(&self) -> Option<WriteBufferManager> {
-        let manager =
-            unsafe { crocksdb_ffi::crocksdb_options_get_cf_write_buffer_manager(self.inner) };
-        if manager.is_null() {
-            None
-        } else {
-            Some(WriteBufferManager { inner: manager })
-        }
     }
 }
 

@@ -58,7 +58,7 @@ impl FileEncryptionInfo {
 pub trait EncryptionKeyManager: Sync + Send {
     fn get_file(&self, fname: &str) -> Result<FileEncryptionInfo>;
     fn new_file(&self, fname: &str) -> Result<FileEncryptionInfo>;
-    fn delete_file(&self, fname: &str, physical_fname: Option<&str>) -> Result<()>;
+    fn delete_file(&self, fname: &str) -> Result<()>;
     fn link_file(&self, src_fname: &str, dst_fname: &str) -> Result<()>;
 }
 
@@ -130,7 +130,6 @@ extern "C" fn encryption_key_manager_new_file<T: EncryptionKeyManager>(
 extern "C" fn encryption_key_manager_delete_file<T: EncryptionKeyManager>(
     ctx: *mut c_void,
     fname: *const c_char,
-    physical_fname: *const c_char,
 ) -> *const c_char {
     let key_manager = unsafe { &*(ctx as *mut T) };
     let fname = match unsafe { CStr::from_ptr(fname).to_str() } {
@@ -142,20 +141,7 @@ extern "C" fn encryption_key_manager_delete_file<T: EncryptionKeyManager>(
             ));
         }
     };
-    let physical_fname = if !physical_fname.is_null() {
-        match unsafe { CStr::from_ptr(physical_fname).to_str() } {
-            Ok(ret) => Some(ret),
-            Err(err) => {
-                return copy_error(format!(
-                    "Encryption key manager encounter non-utf8 file name: {}",
-                    err
-                ));
-            }
-        }
-    } else {
-        None
-    };
-    match key_manager.delete_file(fname, physical_fname) {
+    match key_manager.delete_file(fname) {
         Ok(()) => ptr::null(),
         Err(err) => copy_error(format!(
             "Encryption key manager delete file failure: {}",
@@ -312,24 +298,15 @@ impl EncryptionKeyManager for DBEncryptionKeyManager {
         ret
     }
 
-    fn delete_file(&self, fname: &str, physical_fname: Option<&str>) -> Result<()> {
+    fn delete_file(&self, fname: &str) -> Result<()> {
         use std::io::{Error, ErrorKind};
         let ret: Result<()>;
         unsafe {
             let fname_str = CString::new(fname).unwrap();
-            let err = if let Some(physical) = physical_fname {
-                let physical_str = CString::new(physical).unwrap();
-                crocksdb_ffi::crocksdb_encryption_key_manager_delete_file_ext(
-                    self.inner,
-                    fname_str.as_ptr(),
-                    physical_str.as_ptr(),
-                )
-            } else {
-                crocksdb_ffi::crocksdb_encryption_key_manager_delete_file(
-                    self.inner,
-                    fname_str.as_ptr(),
-                )
-            };
+            let err = crocksdb_ffi::crocksdb_encryption_key_manager_delete_file(
+                self.inner,
+                fname_str.as_ptr(),
+            );
             if err == ptr::null() {
                 ret = Ok(());
             } else {

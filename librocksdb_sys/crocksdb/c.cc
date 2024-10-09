@@ -123,7 +123,6 @@ using rocksdb::LiveFileMetaData;
 using rocksdb::Logger;
 using rocksdb::LRUCacheOptions;
 using rocksdb::MemTableInfo;
-using rocksdb::MergeInstanceOptions;
 using rocksdb::MergeOperator;
 using rocksdb::NewBloomFilterPolicy;
 using rocksdb::NewEncryptedEnv;
@@ -135,7 +134,6 @@ using rocksdb::PartitionerRequest;
 using rocksdb::PartitionerResult;
 using rocksdb::PerfFlags;
 using rocksdb::PinnableSlice;
-using rocksdb::PostWriteCallback;
 using rocksdb::RandomAccessFile;
 using rocksdb::Range;
 using rocksdb::RangePtr;
@@ -444,11 +442,9 @@ struct crocksdb_compactionfilter_t : public CompactionFilter {
 
   virtual ~crocksdb_compactionfilter_t() { (*destructor_)(state_); }
 
-  virtual Decision UnsafeFilter(int level, const Slice& key,
-                                ValueType value_type,
-                                const Slice& existing_value,
-                                std::string* new_value,
-                                std::string* skip_until) const override {
+  virtual Decision FilterV2(int level, const Slice& key, ValueType value_type,
+                            const Slice& existing_value, std::string* new_value,
+                            std::string* skip_until) const override {
     char* c_new_value = nullptr;
     char* c_skip_until = nullptr;
     size_t new_value_length, skip_until_length = 0;
@@ -690,28 +686,6 @@ struct crocksdb_file_system_inspector_t {
   std::shared_ptr<FileSystemInspector> rep;
 };
 
-struct crocksdb_post_write_callback_t : public PostWriteCallback {
-  void* state_;
-  void (*on_post_write_callback)(void*, uint64_t);
-
-  void Callback(SequenceNumber seq) override {
-    on_post_write_callback(state_, seq);
-  }
-};
-
-crocksdb_post_write_callback_t* crocksdb_post_write_callback_init(
-    void* buf, size_t buf_len, void* state,
-    on_post_write_callback_cb on_post_write_callback) {
-  void* input_buf = buf;
-  assert(std::align(alignof(crocksdb_post_write_callback_t),
-                    sizeof(crocksdb_post_write_callback_t), buf,
-                    buf_len) == input_buf);
-  crocksdb_post_write_callback_t* r = new (buf) crocksdb_post_write_callback_t;
-  r->state_ = state;
-  r->on_post_write_callback = on_post_write_callback;
-  return r;
-}
-
 static bool SaveError(char** errptr, const Status& s) {
   assert(errptr != nullptr);
   if (s.ok()) {
@@ -768,23 +742,6 @@ crocksdb_t* crocksdb_open_for_read_only(const crocksdb_options_t* options,
   crocksdb_t* result = new crocksdb_t;
   result->rep = db;
   return result;
-}
-
-void crocksdb_merge_disjoint_instances(crocksdb_t* db,
-                                       unsigned char merge_memtable,
-                                       unsigned char allow_source_write,
-                                       int max_preload_files,
-                                       crocksdb_t** instances,
-                                       size_t num_instances, char** errptr) {
-  MergeInstanceOptions opts;
-  opts.merge_memtable = merge_memtable;
-  opts.allow_source_write = allow_source_write;
-  opts.max_preload_files = max_preload_files;
-  std::vector<DB*> dbs;
-  for (auto i = 0; i < num_instances; i++) {
-    dbs.push_back(instances[i]->rep);
-  }
-  SaveError(errptr, db->rep->MergeDisjointInstances(opts, std::move(dbs)));
 }
 
 void crocksdb_status_ptr_get_error(crocksdb_status_ptr_t* status,
@@ -1143,14 +1100,6 @@ void crocksdb_write(crocksdb_t* db, const crocksdb_writeoptions_t* options,
   SaveError(errptr, db->rep->Write(options->rep, &batch->rep));
 }
 
-void crocksdb_write_callback(crocksdb_t* db,
-                             const crocksdb_writeoptions_t* options,
-                             crocksdb_writebatch_t* batch,
-                             crocksdb_post_write_callback_t* callback,
-                             char** errptr) {
-  SaveError(errptr, db->rep->Write(options->rep, &batch->rep, callback));
-}
-
 void crocksdb_write_multi_batch(crocksdb_t* db,
                                 const crocksdb_writeoptions_t* options,
                                 crocksdb_writebatch_t** batches,
@@ -1159,20 +1108,7 @@ void crocksdb_write_multi_batch(crocksdb_t* db,
   for (size_t i = 0; i < batch_size; i++) {
     ws.push_back(&batches[i]->rep);
   }
-  SaveError(errptr,
-            db->rep->MultiBatchWrite(options->rep, std::move(ws), nullptr));
-}
-
-void crocksdb_write_multi_batch_callback(
-    crocksdb_t* db, const crocksdb_writeoptions_t* options,
-    crocksdb_writebatch_t** batches, size_t batch_size,
-    crocksdb_post_write_callback_t* callback, char** errptr) {
-  std::vector<WriteBatch*> ws;
-  for (size_t i = 0; i < batch_size; i++) {
-    ws.push_back(&batches[i]->rep);
-  }
-  SaveError(errptr,
-            db->rep->MultiBatchWrite(options->rep, std::move(ws), callback));
+  SaveError(errptr, db->rep->MultiBatchWrite(options->rep, std::move(ws)));
 }
 
 char* crocksdb_get(crocksdb_t* db, const crocksdb_readoptions_t* options,
@@ -1437,13 +1373,6 @@ void crocksdb_approximate_memtable_stats_cf(
   db->rep->GetApproximateMemTableStats(cf->rep, range, count, size);
 }
 
-void crocksdb_approximate_active_memtable_stats_cf(
-    const crocksdb_t* db, const crocksdb_column_family_handle_t* cf,
-    uint64_t* memory_bytes, uint64_t* oldest_key_time) {
-  db->rep->GetApproximateActiveMemTableStats(cf->rep, memory_bytes,
-                                             oldest_key_time);
-}
-
 void crocksdb_delete_file(crocksdb_t* db, const char* name, char** errptr) {
   SaveError(errptr, db->rep->DeleteFile(name));
 }
@@ -1498,18 +1427,6 @@ void crocksdb_compact_range_cf_opt(
       // Pass nullptr Slice if corresponding "const char*" is nullptr
       (start_key ? (a = Slice(start_key, start_key_len), &a) : nullptr),
       (limit_key ? (b = Slice(limit_key, limit_key_len), &b) : nullptr));
-}
-
-void crocksdb_check_in_range(crocksdb_t* db, const char* start_key,
-                             size_t start_key_len, const char* limit_key,
-                             size_t limit_key_len, char** errptr) {
-  Slice a, b;
-  SaveError(
-      errptr,
-      db->rep->CheckInRange(
-          // Pass nullptr Slice if corresponding "const char*" is nullptr
-          (start_key ? (a = Slice(start_key, start_key_len), &a) : nullptr),
-          (limit_key ? (b = Slice(limit_key, limit_key_len), &b) : nullptr)));
 }
 
 void crocksdb_flush(crocksdb_t* db, const crocksdb_flushoptions_t* options,
@@ -2416,10 +2333,6 @@ uint64_t crocksdb_memtableinfo_earliest_seqno(
     const crocksdb_memtableinfo_t* info) {
   return info->rep.earliest_seqno;
 }
-uint64_t crocksdb_memtableinfo_largest_seqno(
-    const crocksdb_memtableinfo_t* info) {
-  return info->rep.largest_seqno;
-}
 uint64_t crocksdb_memtableinfo_num_entries(
     const crocksdb_memtableinfo_t* info) {
   return info->rep.num_entries;
@@ -2689,11 +2602,6 @@ void crocksdb_options_set_env(crocksdb_options_t* opt, crocksdb_env_t* env) {
 void crocksdb_options_set_write_buffer_manager(
     crocksdb_options_t* opt, crocksdb_write_buffer_manager_t* wbm) {
   opt->rep.write_buffer_manager = wbm->rep;
-}
-
-void crocksdb_options_set_cf_write_buffer_manager(
-    crocksdb_options_t* opt, crocksdb_write_buffer_manager_t* wbm) {
-  opt->rep.cf_write_buffer_manager = wbm->rep;
 }
 
 void crocksdb_options_set_compaction_thread_limiter(
@@ -3498,17 +3406,6 @@ crocksdb_write_buffer_manager_t* crocksdb_options_get_write_buffer_manager(
   return nullptr;
 }
 
-crocksdb_write_buffer_manager_t* crocksdb_options_get_cf_write_buffer_manager(
-    crocksdb_options_t* opt) {
-  if (opt->rep.cf_write_buffer_manager != nullptr) {
-    crocksdb_write_buffer_manager_t* manager =
-        new crocksdb_write_buffer_manager_t;
-    manager->rep = opt->rep.cf_write_buffer_manager;
-    return manager;
-  }
-  return nullptr;
-}
-
 void crocksdb_options_set_vector_memtable_factory(crocksdb_options_t* opt,
                                                   uint64_t reserved_bytes) {
   opt->rep.memtable_factory.reset(new VectorRepFactory(reserved_bytes));
@@ -3640,26 +3537,11 @@ int64_t crocksdb_ratelimiter_get_total_requests(crocksdb_ratelimiter_t* limiter,
 }
 
 crocksdb_write_buffer_manager_t* crocksdb_write_buffer_manager_create(
-    size_t flush_size, float stall_ratio, unsigned char flush_oldest_first) {
+    size_t buffer_size, unsigned char allow_stall) {
   crocksdb_write_buffer_manager_t* wbm = new crocksdb_write_buffer_manager_t;
-  wbm->rep = std::make_shared<WriteBufferManager>(
-      flush_size, nullptr, stall_ratio, flush_oldest_first);
+  wbm->rep = std::make_shared<WriteBufferManager>(buffer_size);
+  wbm->rep->SetAllowStall(allow_stall);
   return wbm;
-}
-
-void crocksdb_write_buffer_manager_set_flush_size(
-    crocksdb_write_buffer_manager_t* wbm, size_t flush_size) {
-  wbm->rep->SetFlushSize(flush_size);
-}
-
-size_t crocksdb_write_buffer_manager_flush_size(
-    crocksdb_write_buffer_manager_t* wbm) {
-  return wbm->rep->flush_size();
-}
-
-void crocksdb_write_buffer_manager_set_flush_oldest_first(
-    crocksdb_write_buffer_manager_t* wbm, unsigned char flush_oldest_first) {
-  wbm->rep->SetFlushOldestFirst(flush_oldest_first);
 }
 
 size_t crocksdb_write_buffer_manager_memory_usage(
@@ -4109,16 +3991,6 @@ void crocksdb_flushoptions_set_allow_write_stall(crocksdb_flushoptions_t* opt,
   opt->rep.allow_write_stall = v;
 }
 
-void crocksdb_flushoptions_set_expected_oldest_key_time(
-    crocksdb_flushoptions_t* opt, uint64_t v) {
-  opt->rep.expected_oldest_key_time = v;
-}
-
-void crocksdb_flushoptions_set_check_if_compaction_disabled(
-    crocksdb_flushoptions_t* opt, unsigned char v) {
-  opt->rep.check_if_compaction_disabled = v;
-}
-
 crocksdb_memory_allocator_t* crocksdb_jemalloc_nodump_allocator_create(
     char** errptr) {
   crocksdb_memory_allocator_t* allocator = new crocksdb_memory_allocator_t;
@@ -4428,7 +4300,7 @@ struct crocksdb_encryption_key_manager_impl_t : public KeyManager {
   }
 
   Status DeleteFile(const std::string& fname) override {
-    const char* ret = delete_file(state, fname.c_str(), nullptr);
+    const char* ret = delete_file(state, fname.c_str());
     Status s;
     if (ret != nullptr) {
       s = Status::Corruption(std::string(ret));
@@ -4440,17 +4312,6 @@ struct crocksdb_encryption_key_manager_impl_t : public KeyManager {
   Status LinkFile(const std::string& src_fname,
                   const std::string& dst_fname) override {
     const char* ret = link_file(state, src_fname.c_str(), dst_fname.c_str());
-    Status s;
-    if (ret != nullptr) {
-      s = Status::Corruption(std::string(ret));
-      delete ret;
-    }
-    return s;
-  }
-
-  Status DeleteFileExt(const std::string& fname,
-                       const std::string& physical_fname) override {
-    const char* ret = delete_file(state, fname.c_str(), physical_fname.c_str());
     Status s;
     if (ret != nullptr) {
       s = Status::Corruption(std::string(ret));
@@ -4529,19 +4390,6 @@ const char* crocksdb_encryption_key_manager_link_file(
   assert(src_fname != nullptr);
   assert(dst_fname != nullptr);
   Status s = key_manager->rep->LinkFile(src_fname, dst_fname);
-  if (!s.ok()) {
-    return strdup(s.ToString().c_str());
-  }
-  return nullptr;
-}
-
-const char* crocksdb_encryption_key_manager_delete_file_ext(
-    crocksdb_encryption_key_manager_t* key_manager, const char* fname,
-    const char* physical_fname) {
-  assert(key_manager != nullptr && key_manager->rep != nullptr);
-  assert(fname != nullptr);
-  assert(physical_fname != nullptr);
-  Status s = key_manager->rep->DeleteFileExt(fname, physical_fname);
   if (!s.ok()) {
     return strdup(s.ToString().c_str());
   }

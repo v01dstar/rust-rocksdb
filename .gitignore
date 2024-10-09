@@ -5,6 +5,7 @@
 _rust_rocksdb*
 *rlib
 tags
+build/
 
 .idea/
 out/

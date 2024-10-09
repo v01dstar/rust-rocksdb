@@ -21,7 +21,7 @@ extern crate tempfile;
 use std::ffi::CStr;
 use std::fmt;
 
-use libc::{c_char, c_double, c_float, c_int, c_uchar, c_void, size_t};
+use libc::{c_char, c_double, c_int, c_uchar, c_void, size_t};
 
 // FFI-safe opaque types.
 //
@@ -75,8 +75,6 @@ pub struct DBIterator(c_void);
 pub struct DBCFHandle(c_void);
 #[repr(C)]
 pub struct DBWriteBatch(c_void);
-#[repr(C)]
-pub struct DBPostWriteCallback(c_void);
 #[repr(C)]
 pub struct DBComparator(c_void);
 #[repr(C)]
@@ -750,10 +748,6 @@ extern "C" {
         options: *mut Options,
         wbm: *mut DBWriteBufferManager,
     );
-    pub fn crocksdb_options_set_cf_write_buffer_manager(
-        options: *mut Options,
-        wbm: *mut DBWriteBufferManager,
-    );
     pub fn crocksdb_options_set_compaction_thread_limiter(
         options: *mut Options,
         wbm: *mut DBConcurrentTaskLimiter,
@@ -964,9 +958,6 @@ extern "C" {
     pub fn crocksdb_options_get_write_buffer_manager(
         options: *mut Options,
     ) -> *mut DBWriteBufferManager;
-    pub fn crocksdb_options_get_cf_write_buffer_manager(
-        options: *mut Options,
-    ) -> *mut DBWriteBufferManager;
     pub fn crocksdb_options_set_info_log(options: *mut Options, logger: *mut DBLogger);
     pub fn crocksdb_options_get_block_cache_usage(options: *const Options) -> usize;
     pub fn crocksdb_options_set_block_cache_capacity(
@@ -1032,18 +1023,8 @@ extern "C" {
 
     pub fn crocksdb_write_buffer_manager_create(
         flush_size: size_t,
-        stall_ratio: c_float,
-        flush_oldest_first: bool,
+        allow_stall: bool,
     ) -> *mut DBWriteBufferManager;
-    pub fn crocksdb_write_buffer_manager_set_flush_size(
-        wbm: *mut DBWriteBufferManager,
-        flush_size: size_t,
-    );
-    pub fn crocksdb_write_buffer_manager_flush_size(wbm: *mut DBWriteBufferManager) -> usize;
-    pub fn crocksdb_write_buffer_manager_set_flush_oldest_first(
-        wbm: *mut DBWriteBufferManager,
-        flush_oldest_first: bool,
-    );
     pub fn crocksdb_write_buffer_manager_memory_usage(wbm: *mut DBWriteBufferManager) -> usize;
     pub fn crocksdb_write_buffer_manager_destroy(wbm: *mut DBWriteBufferManager);
 
@@ -1108,15 +1089,6 @@ extern "C" {
         options: *mut Options,
         path: *const c_char,
         error_if_log_file_exist: bool,
-        err: *mut *mut c_char,
-    ) -> *mut DBInstance;
-    pub fn crocksdb_merge_disjoint_instances(
-        db: *mut DBInstance,
-        merge_memtable: bool,
-        allow_source_write: bool,
-        max_preload_files: c_int,
-        instances: *const *mut DBInstance,
-        num_instances: size_t,
         err: *mut *mut c_char,
     ) -> *mut DBInstance;
     pub fn crocksdb_writeoptions_create() -> *mut DBWriteOptions;
@@ -1343,27 +1315,11 @@ extern "C" {
         batch: *mut DBWriteBatch,
         err: *mut *mut c_char,
     );
-    pub fn crocksdb_write_callback(
-        db: *mut DBInstance,
-        writeopts: *const DBWriteOptions,
-        batch: *mut DBWriteBatch,
-        callback: *mut DBPostWriteCallback,
-        err: *mut *mut c_char,
-    );
-
     pub fn crocksdb_write_multi_batch(
         db: *mut DBInstance,
         writeopts: *const DBWriteOptions,
         batch: *const *mut DBWriteBatch,
         batchlen: size_t,
-        err: *mut *mut c_char,
-    );
-    pub fn crocksdb_write_multi_batch_callback(
-        db: *mut DBInstance,
-        writeopts: *const DBWriteOptions,
-        batch: *const *mut DBWriteBatch,
-        batchlen: size_t,
-        callback: *mut DBPostWriteCallback,
         err: *mut *mut c_char,
     );
     pub fn crocksdb_writebatch_create() -> *mut DBWriteBatch;
@@ -1705,14 +1661,6 @@ extern "C" {
         limit_key: *const u8,
         limit_key_len: size_t,
     );
-    pub fn crocksdb_check_in_range(
-        db: *mut DBInstance,
-        start_key: *const u8,
-        start_key_len: size_t,
-        limit_key: *const u8,
-        limit_key_len: size_t,
-        err: *mut *mut c_char,
-    );
     pub fn crocksdb_delete_file(db: *mut DBInstance, name: *const c_char, err: *mut *mut c_char);
     pub fn crocksdb_delete_files_in_range(
         db: *mut DBInstance,
@@ -1949,7 +1897,7 @@ extern "C" {
             *const c_char,
             *mut DBFileEncryptionInfo,
         ) -> *const c_char,
-        delete_file: extern "C" fn(*mut c_void, *const c_char, *const c_char) -> *const c_char,
+        delete_file: extern "C" fn(*mut c_void, *const c_char) -> *const c_char,
         link_file: extern "C" fn(*mut c_void, *const c_char, *const c_char) -> *const c_char,
     ) -> *mut DBEncryptionKeyManagerInstance;
     #[cfg(feature = "encryption")]
@@ -1979,13 +1927,6 @@ extern "C" {
         src_fname: *const c_char,
         dst_fname: *const c_char,
     ) -> *const c_char;
-    #[cfg(feature = "encryption")]
-    pub fn crocksdb_encryption_key_manager_delete_file_ext(
-        key_manager: *mut DBEncryptionKeyManagerInstance,
-        fname: *const c_char,
-        physical_fname: *const c_char,
-    ) -> *const c_char;
-
     #[cfg(feature = "encryption")]
     pub fn crocksdb_key_managed_encrypted_env_create(
         base_env: *mut DBEnv,
@@ -2470,7 +2411,6 @@ extern "C" {
     ) -> *const c_char;
     pub fn crocksdb_memtableinfo_first_seqno(info: *const DBMemTableInfo) -> u64;
     pub fn crocksdb_memtableinfo_earliest_seqno(info: *const DBMemTableInfo) -> u64;
-    pub fn crocksdb_memtableinfo_largest_seqno(info: *const DBMemTableInfo) -> u64;
     pub fn crocksdb_memtableinfo_num_entries(info: *const DBMemTableInfo) -> u64;
     pub fn crocksdb_memtableinfo_num_deletes(info: *const DBMemTableInfo) -> u64;
 
@@ -2490,13 +2430,6 @@ extern "C" {
     ) -> *mut DBEventListener;
     pub fn crocksdb_eventlistener_destroy(et: *mut DBEventListener);
     pub fn crocksdb_options_add_eventlistener(opt: *mut Options, et: *mut DBEventListener);
-
-    pub fn crocksdb_post_write_callback_init(
-        buf: *mut c_void,
-        buf_len: usize,
-        state: *mut c_void,
-        post_write_callback: extern "C" fn(*mut c_void, u64),
-    ) -> *mut DBPostWriteCallback;
 
     // Get All Key Versions
     pub fn crocksdb_keyversions_destroy(kvs: *mut DBKeyVersions);

@@ -14,8 +14,7 @@
 
 use crocksdb_ffi::{
     self, DBBackupEngine, DBCFHandle, DBCache, DBCompressionType, DBEnv, DBInstance, DBMapProperty,
-    DBPinnableSlice, DBPostWriteCallback, DBSequentialFile, DBTablePropertiesCollection,
-    DBTitanDBOptions, DBWriteBatch,
+    DBPinnableSlice, DBSequentialFile, DBTablePropertiesCollection, DBTitanDBOptions, DBWriteBatch,
 };
 use libc::{self, c_char, c_int, c_void, size_t};
 use librocksdb_sys::DBMemoryAllocator;
@@ -23,14 +22,13 @@ use metadata::ColumnFamilyMetaData;
 use rocksdb_options::{
     CColumnFamilyDescriptor, ColumnFamilyDescriptor, ColumnFamilyOptions, CompactOptions,
     CompactionOptions, DBOptions, EnvOptions, FlushOptions, IngestExternalFileOptions,
-    LRUCacheOptions, MergeInstanceOptions, ReadOptions, RestoreOptions, UnsafeSnap, WriteOptions,
+    LRUCacheOptions, ReadOptions, RestoreOptions, UnsafeSnap, WriteOptions,
 };
 use std::collections::BTreeMap;
 use std::ffi::{CStr, CString};
 use std::fmt::{self, Debug, Formatter};
 use std::io;
 use std::mem;
-use std::mem::MaybeUninit;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -465,42 +463,6 @@ impl<'a> Range<'a> {
     }
 }
 
-pub struct PostWriteCallback<'a, F: FnMut(u64)> {
-    _callback: &'a mut F,
-    raw_buf: MaybeUninit<[u64; 3]>,
-}
-
-extern "C" fn on_post_write_callback<F: FnMut(u64)>(ctx: *mut c_void, seq: u64) {
-    unsafe {
-        let ctx = &mut *(ctx as *mut F);
-        ctx(seq);
-    }
-}
-
-impl<'a, F: FnMut(u64)> PostWriteCallback<'a, F> {
-    #[inline]
-    fn new(f: &'a mut F) -> Self {
-        unsafe {
-            let mut raw_buf: MaybeUninit<[u64; 3]> = MaybeUninit::uninit();
-            crocksdb_ffi::crocksdb_post_write_callback_init(
-                raw_buf.as_mut_ptr() as *mut c_void,
-                std::mem::size_of_val(&raw_buf),
-                f as *mut F as *mut c_void,
-                on_post_write_callback::<F>,
-            );
-            Self {
-                _callback: f,
-                raw_buf,
-            }
-        }
-    }
-
-    #[inline]
-    fn as_raw_callback(&mut self) -> *mut DBPostWriteCallback {
-        self.raw_buf.as_mut_ptr() as *mut DBPostWriteCallback
-    }
-}
-
 pub struct KeyVersion {
     pub key: String,
     pub value: String,
@@ -747,21 +709,6 @@ impl DB {
         })
     }
 
-    pub fn merge_instances(&self, opts: &MergeInstanceOptions, dbs: &[&DB]) -> Result<(), String> {
-        unsafe {
-            let dbs: Vec<*mut DBInstance> = dbs.iter().map(|db| db.inner).collect();
-            ffi_try!(crocksdb_merge_disjoint_instances(
-                self.inner,
-                opts.merge_memtable,
-                opts.allow_source_write,
-                opts.max_preload_files,
-                dbs.as_ptr(),
-                dbs.len()
-            ));
-        }
-        Ok(())
-    }
-
     pub fn destroy(opts: &DBOptions, path: &str) -> Result<(), String> {
         let cpath = CString::new(path.as_bytes()).unwrap();
         unsafe {
@@ -849,24 +796,6 @@ impl DB {
         Ok(())
     }
 
-    pub fn write_callback<F: FnMut(u64)>(
-        &self,
-        batch: &WriteBatch,
-        writeopts: &WriteOptions,
-        mut callback: F,
-    ) -> Result<(), String> {
-        let mut callback = PostWriteCallback::new(&mut callback);
-        unsafe {
-            ffi_try!(crocksdb_write_callback(
-                self.inner,
-                writeopts.inner,
-                batch.inner,
-                callback.as_raw_callback()
-            ));
-        }
-        Ok(())
-    }
-
     pub fn multi_batch_write(
         &self,
         batches: &[WriteBatch],
@@ -880,28 +809,6 @@ impl DB {
                     writeopts.inner,
                     b.as_ptr(),
                     b.len()
-                ));
-            }
-        }
-        Ok(())
-    }
-
-    pub fn multi_batch_write_callback<F: FnMut(u64)>(
-        &self,
-        batches: &[WriteBatch],
-        writeopts: &WriteOptions,
-        mut callback: F,
-    ) -> Result<(), String> {
-        let mut callback = PostWriteCallback::new(&mut callback);
-        unsafe {
-            let b: Vec<*mut DBWriteBatch> = batches.iter().map(|w| w.inner).collect();
-            if !b.is_empty() {
-                ffi_try!(crocksdb_write_multi_batch_callback(
-                    self.inner,
-                    writeopts.inner,
-                    b.as_ptr(),
-                    b.len(),
-                    callback.as_raw_callback()
                 ));
             }
         }
@@ -1463,21 +1370,6 @@ impl DB {
                 end,
                 e_len,
             );
-        }
-    }
-
-    pub fn check_in_range(
-        &self,
-        start_key: Option<&[u8]>,
-        end_key: Option<&[u8]>,
-    ) -> Result<(), String> {
-        unsafe {
-            let (start, s_len) = start_key.map_or((ptr::null(), 0), |k| (k.as_ptr(), k.len()));
-            let (end, e_len) = end_key.map_or((ptr::null(), 0), |k| (k.as_ptr(), k.len()));
-            ffi_try!(crocksdb_check_in_range(
-                self.inner, start, s_len, end, e_len
-            ));
-            Ok(())
         }
     }
 
@@ -3643,16 +3535,13 @@ mod test {
             w.put_cf(cf, s.to_vec().as_slice(), b"a").unwrap();
             data.push(w);
         }
-        let mut seqno = 0;
-        db.multi_batch_write_callback(&data, &WriteOptions::new(), |s| seqno = s)
+        db.multi_batch_write(&data, &WriteOptions::default())
             .unwrap();
         for s in &[b"ab", b"cd", b"ef"] {
             let v = db.get_cf(cf, s.to_vec().as_slice()).unwrap();
             assert!(v.is_some());
             assert_eq!(v.unwrap().to_utf8().unwrap(), "a");
         }
-        assert!(seqno > 0);
-        assert!(seqno <= db.get_latest_sequence_number());
     }
 
     #[test]
@@ -3903,85 +3792,5 @@ mod test {
             limiter.set_limit(10);
             limiter.set_limit(0);
         }
-    }
-
-    #[test]
-    fn test_merge_instance() {
-        let path_dir = tempdir_with_prefix("_test_merge_instance");
-        let root_path = path_dir.path();
-        let cfs = ["default", "cf1"];
-        let cfs_opts = vec![ColumnFamilyOptions::new(); 2];
-        let mut opts = DBOptions::new();
-        opts.set_write_buffer_manager(&crate::WriteBufferManager::new(0, 0.0, true));
-        opts.create_if_missing(true);
-        opts.create_missing_column_families(true);
-        let mut wopts = WriteOptions::new();
-        wopts.disable_wal(true);
-        let db1 = DB::open_cf(
-            opts.clone(),
-            root_path.join("1").to_str().unwrap(),
-            cfs.iter().map(|cf| *cf).zip(cfs_opts.clone()).collect(),
-        )
-        .unwrap();
-        db1.put_opt(b"1", b"v", &wopts).unwrap();
-        db1.check_in_range(Some(b"1"), Some(b"2")).unwrap();
-        db1.check_in_range(Some(b"2"), Some(b"3")).unwrap_err();
-        let db2 = DB::open_cf(
-            opts.clone(),
-            root_path.join("2").to_str().unwrap(),
-            cfs.iter().map(|cf| *cf).zip(cfs_opts.clone()).collect(),
-        )
-        .unwrap();
-        db2.put_opt(b"2", b"v", &wopts).unwrap();
-        db2.check_in_range(Some(b"2"), Some(b"3")).unwrap();
-        let db3 = DB::open_cf(
-            opts.clone(),
-            root_path.join("3").to_str().unwrap(),
-            cfs.iter().map(|cf| *cf).zip(cfs_opts).collect(),
-        )
-        .unwrap();
-        let mopts = MergeInstanceOptions {
-            merge_memtable: true,
-            allow_source_write: true,
-            ..Default::default()
-        };
-        db3.merge_instances(&mopts, &[&db1, &db2]).unwrap();
-        db3.check_in_range(Some(b"2"), Some(b"3")).unwrap_err();
-        db3.check_in_range(Some(b"1"), Some(b"3")).unwrap();
-        assert_eq!(db3.get(b"1").unwrap().unwrap(), b"v");
-        assert_eq!(db3.get(b"2").unwrap().unwrap(), b"v");
-        let wbm = opts.get_write_buffer_manager().unwrap();
-        wbm.set_flush_size(10);
-        wbm.set_flush_oldest_first(false);
-    }
-
-    #[test]
-    fn test_set_cf_write_buffer_manager() {
-        let path_dir = tempdir_with_prefix("_set_cf_write_buffer_manager");
-        let root_path = path_dir.path();
-        let wbm1 = crate::WriteBufferManager::new(5, 0.0, true);
-        let wbm2 = crate::WriteBufferManager::new(10, 0.0, true);
-        let cfs = ["default", "cf1"];
-        let mut cfs_opts = vec![ColumnFamilyOptions::new(), ColumnFamilyOptions::new()];
-        cfs_opts[0].set_write_buffer_manager(&wbm1);
-        cfs_opts[1].set_write_buffer_manager(&wbm2);
-
-        let mut opts = DBOptions::new();
-        opts.set_write_buffer_manager(&crate::WriteBufferManager::new(0, 0.0, true));
-        opts.create_if_missing(true);
-        opts.create_missing_column_families(true);
-        let _ = DB::open_cf(
-            opts.clone(),
-            root_path.join("1").to_str().unwrap(),
-            cfs.iter().map(|cf| *cf).zip(cfs_opts.clone()).collect(),
-        );
-        assert_eq!(
-            cfs_opts[0].get_write_buffer_manager().unwrap().flush_size(),
-            5
-        );
-        assert_eq!(
-            cfs_opts[1].get_write_buffer_manager().unwrap().flush_size(),
-            10
-        );
     }
 }

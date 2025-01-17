@@ -22,8 +22,8 @@ use rocksdb::crocksdb_ffi::{
 };
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyOptions, CompactOptions, DBOptions, Env,
-    FifoCompactionOptions, FlushOptions, IndexType, LRUCacheOptions, RateLimiter, ReadOptions,
-    SeekKey, SliceTransform, Statistics, Writable, WriteOptions, DB,
+    FifoCompactionOptions, FlushOptions, HyperClockCacheOptions, IndexType, LRUCacheOptions,
+    RateLimiter, ReadOptions, SeekKey, SliceTransform, Statistics, Writable, WriteOptions, DB,
 };
 
 use super::tempdir_with_prefix;
@@ -355,6 +355,19 @@ fn test_set_lru_cache() {
     let mut cache_opts = LRUCacheOptions::new();
     cache_opts.set_capacity(8388608);
     block_opts.set_block_cache(&Cache::new_lru_cache(cache_opts));
+    cf_opts.set_block_based_table_factory(&block_opts);
+    DB::open_cf(opts, path.path().to_str().unwrap(), vec!["default"]).unwrap();
+}
+
+#[test]
+fn test_hyper_clock_cache() {
+    let path = tempdir_with_prefix("_rust_rocksdb_hyper_clock_cache");
+    let mut opts = DBOptions::new();
+    let mut cf_opts = ColumnFamilyOptions::new();
+    opts.create_if_missing(true);
+    let mut block_opts = BlockBasedOptions::new();
+    let cache_opts = HyperClockCacheOptions::new(8388608, 4096);
+    block_opts.set_block_cache(&cache_opts.make_shared_cache());
     cf_opts.set_block_based_table_factory(&block_opts);
     DB::open_cf(opts, path.path().to_str().unwrap(), vec!["default"]).unwrap();
 }

@@ -64,6 +64,8 @@ pub struct DBMemoryAllocator(c_void);
 #[repr(C)]
 pub struct DBLRUCacheOptions(c_void);
 #[repr(C)]
+pub struct DBHyperClockCacheOptions(c_void);
+#[repr(C)]
 pub struct DBCache(c_void);
 #[repr(C)]
 pub struct DBFilterPolicy(c_void);
@@ -656,6 +658,13 @@ extern "C" {
         allocator: *mut DBMemoryAllocator,
     );
     pub fn crocksdb_cache_create_lru(opt: *mut DBLRUCacheOptions) -> *mut DBCache;
+    pub fn crocksdb_hyper_clock_cache_options_create(
+        capacity: size_t,
+        estimated_entry_charge: size_t,
+    ) -> *mut DBHyperClockCacheOptions;
+    pub fn crocksdb_hyper_clock_cache_options_make_shared_cache(
+        opts: *mut DBHyperClockCacheOptions,
+    ) -> *mut DBCache;
     pub fn crocksdb_cache_destroy(cache: *mut DBCache);
 
     pub fn crocksdb_block_based_options_create() -> *mut DBBlockBasedTableOptions;

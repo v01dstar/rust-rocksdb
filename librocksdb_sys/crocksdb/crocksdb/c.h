@@ -77,6 +77,8 @@ typedef struct crocksdb_backup_engine_t crocksdb_backup_engine_t;
 typedef struct crocksdb_backup_engine_info_t crocksdb_backup_engine_info_t;
 typedef struct crocksdb_restore_options_t crocksdb_restore_options_t;
 typedef struct crocksdb_lru_cache_options_t crocksdb_lru_cache_options_t;
+typedef struct crocksdb_hyper_clock_cache_options_t
+    crocksdb_hyper_clock_cache_options_t;
 typedef struct crocksdb_cache_t crocksdb_cache_t;
 typedef struct crocksdb_memory_allocator_t crocksdb_memory_allocator_t;
 typedef struct crocksdb_compactionfilter_t crocksdb_compactionfilter_t;
@@ -1738,6 +1740,12 @@ crocksdb_lru_cache_options_set_memory_allocator(crocksdb_lru_cache_options_t*,
                                                 crocksdb_memory_allocator_t*);
 extern C_ROCKSDB_LIBRARY_API crocksdb_cache_t* crocksdb_cache_create_lru(
     crocksdb_lru_cache_options_t*);
+extern C_ROCKSDB_LIBRARY_API crocksdb_hyper_clock_cache_options_t*
+crocksdb_hyper_clock_cache_options_create(size_t capacity,
+                                          size_t estimated_entry_charge);
+extern C_ROCKSDB_LIBRARY_API crocksdb_cache_t*
+crocksdb_hyper_clock_cache_options_make_shared_cache(
+    crocksdb_hyper_clock_cache_options_t*);
 extern C_ROCKSDB_LIBRARY_API void crocksdb_cache_destroy(
     crocksdb_cache_t* cache);
 extern C_ROCKSDB_LIBRARY_API void crocksdb_cache_set_capacity(

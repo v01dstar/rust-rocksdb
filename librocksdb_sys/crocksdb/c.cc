@@ -115,6 +115,7 @@ using rocksdb::FlushJobInfo;
 using rocksdb::FlushOptions;
 using rocksdb::FSRandomAccessFile;
 using rocksdb::HistogramData;
+using rocksdb::HyperClockCacheOptions;
 using rocksdb::InfoLogLevel;
 using rocksdb::IngestExternalFileOptions;
 using rocksdb::Iterator;
@@ -335,6 +336,9 @@ struct crocksdb_logger_impl_t : public Logger {
 };
 struct crocksdb_lru_cache_options_t {
   LRUCacheOptions rep;
+};
+struct crocksdb_hyper_clock_cache_options_t {
+  HyperClockCacheOptions rep;
 };
 struct crocksdb_cache_t {
   shared_ptr<Cache> rep;
@@ -4183,6 +4187,19 @@ void crocksdb_lru_cache_options_set_memory_allocator(
 crocksdb_cache_t* crocksdb_cache_create_lru(crocksdb_lru_cache_options_t* opt) {
   crocksdb_cache_t* c = new crocksdb_cache_t;
   c->rep = NewLRUCache(opt->rep);
+  return c;
+}
+
+crocksdb_hyper_clock_cache_options_t* crocksdb_hyper_clock_cache_options_create(
+    size_t capacity, size_t estimated_entry_charge) {
+  return new crocksdb_hyper_clock_cache_options_t{
+      HyperClockCacheOptions(capacity, estimated_entry_charge)};
+}
+
+crocksdb_cache_t* crocksdb_hyper_clock_cache_options_make_shared_cache(
+    crocksdb_hyper_clock_cache_options_t* opts) {
+  crocksdb_cache_t* c = new crocksdb_cache_t;
+  c->rep = opts->rep.MakeSharedCache();
   return c;
 }
 

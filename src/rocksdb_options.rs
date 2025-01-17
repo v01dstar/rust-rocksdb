@@ -21,10 +21,11 @@ use comparator::{self, compare_callback, ComparatorCallback};
 use crocksdb_ffi::{
     self, ChecksumType, DBBlockBasedTableOptions, DBBottommostLevelCompaction, DBCompactOptions,
     DBCompactionOptions, DBCompressionType, DBConcurrentTaskLimiter, DBFifoCompactionOptions,
-    DBFlushOptions, DBInfoLogLevel, DBInstance, DBLRUCacheOptions, DBRateLimiter,
-    DBRateLimiterMode, DBReadOptions, DBRecoveryMode, DBRestoreOptions, DBSnapshot, DBStatistics,
-    DBStatisticsHistogramType, DBStatisticsTickerType, DBTitanDBOptions, DBTitanReadOptions,
-    DBWriteBufferManager, DBWriteOptions, IndexType, Options, PrepopulateBlockCache,
+    DBFlushOptions, DBHyperClockCacheOptions, DBInfoLogLevel, DBInstance, DBLRUCacheOptions,
+    DBRateLimiter, DBRateLimiterMode, DBReadOptions, DBRecoveryMode, DBRestoreOptions, DBSnapshot,
+    DBStatistics, DBStatisticsHistogramType, DBStatisticsTickerType, DBTitanDBOptions,
+    DBTitanReadOptions, DBWriteBufferManager, DBWriteOptions, IndexType, Options,
+    PrepopulateBlockCache,
 };
 use event_listener::{new_event_listener, EventListener};
 use libc::{self, c_double, c_int, c_uchar, c_void, size_t};
@@ -2495,6 +2496,33 @@ impl Drop for LRUCacheOptions {
     fn drop(&mut self) {
         unsafe {
             crocksdb_ffi::crocksdb_lru_cache_options_destroy(self.inner);
+        }
+    }
+}
+
+pub struct HyperClockCacheOptions {
+    pub(crate) inner: *mut DBHyperClockCacheOptions,
+}
+
+impl HyperClockCacheOptions {
+    pub fn new(capacity: usize, estimated_entry_charge: usize) -> HyperClockCacheOptions {
+        unsafe {
+            HyperClockCacheOptions {
+                inner: crocksdb_ffi::crocksdb_hyper_clock_cache_options_create(
+                    capacity,
+                    estimated_entry_charge,
+                ),
+            }
+        }
+    }
+
+    pub fn make_shared_cache(&self) -> Cache {
+        unsafe {
+            Cache {
+                inner: crocksdb_ffi::crocksdb_hyper_clock_cache_options_make_shared_cache(
+                    self.inner,
+                ),
+            }
         }
     }
 }
